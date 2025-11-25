@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  ponder:
+    build: .
+    ports:
+      - "${PONDER_PORT:-42069}:42069" 
+    environment:
+      - NODE_ENV=${NODE_ENV:-production}
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    env_file:
+      - .env
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    env_file:
+      - .env
+
+volumes:
+  postgres_data:
