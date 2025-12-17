@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 env:
-  DOCKER_TAGS: dfxswiss/realunitshares-ponder:beta
+  DOCKER_TAGS: dfxswiss/boltz-claim:beta
 
 jobs:
   build-and-push:
