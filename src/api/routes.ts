@@ -21,7 +21,14 @@ routes.get("/check-preimagehash", async (c: Context) => {
     return c.json({ error: "Lockup not found" }, 404);
   }
 
-  return c.json({ lockup: lockup.length > 0 ? lockup[0]! : null });
+  const data = lockup[0]!;
+  return c.json({
+    lockup: {
+      ...data,
+      amount: data.amount?.toString(),
+      timelock: data.timelock?.toString()
+    }
+  });
 });
 
 routes.post("/help-me-claim", async (c: Context) => {
