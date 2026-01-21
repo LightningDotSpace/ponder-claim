@@ -4,8 +4,10 @@ import { Context, Hono } from "hono";
 import { and, eq } from "ponder";
 import { ethers, formatEther } from "ethers";
 import { CoinSwapABI } from "../../abis/CoinSwap";
+import { ERC20SwapABI } from "../../abis/ERC20Swap";
 import config from "../../ponder.config";
 import { createSigner, prefix0x } from "../utils/evm";
+import { SwapType } from "../utils/constants";
 
 const routes = new Hono();
 
@@ -35,8 +37,6 @@ routes.post("/help-me-claim", async (c: Context) => {
   const { preimageHash, preimage } = await c.req.json();
 
   const signer = createSigner(process.env.SIGNER_PRIVATE_KEY!);
-  const coinSwapAddress = config.contracts.CoinSwapAbi.address;
-  const coinSwap = new ethers.Contract(coinSwapAddress, CoinSwapABI, signer);
 
   const lockup = await db.select().from(lockups).where(
     and(
@@ -55,30 +55,57 @@ routes.post("/help-me-claim", async (c: Context) => {
   const claimAddress = lockupData.claimAddress;
   const refundAddress = lockupData.refundAddress;
   const timelock = lockupData.timelock;
+  const swapType = lockupData.swapType;
+  const tokenAddress = lockupData.tokenAddress;
 
   try {
-    if (!coinSwap) {
-      return c.json({ error: "Contract not initialized" }, 500);
+    if (swapType === SwapType.ERC20) {
+      // ERC20 swap claim
+      const erc20SwapAddress = config.contracts.ERC20SwapCitrea.address;
+      const erc20Swap = new ethers.Contract(erc20SwapAddress, ERC20SwapABI, signer);
+
+      const tx = await erc20Swap.getFunction("claim")(
+        prefix0x(preimage),
+        amount,
+        tokenAddress,
+        refundAddress,
+        timelock
+      );
+
+      const receipt = await tx.wait();
+
+      return c.json({
+        success: true,
+        txHash: receipt.hash,
+        swapType: SwapType.ERC20,
+      });
+    } else {
+      // Native swap claim (CoinSwap)
+      const coinSwapAddress = config.contracts.CoinSwapAbi.address;
+      const coinSwap = new ethers.Contract(coinSwapAddress, CoinSwapABI, signer);
+
+      const tx = await coinSwap.getFunction("claim(bytes32,uint256,address,address,uint256)")(
+        prefix0x(preimage),
+        Number(amount),
+        claimAddress,
+        refundAddress,
+        timelock
+      );
+
+      const receipt = await tx.wait();
+
+      return c.json({
+        success: true,
+        txHash: receipt.hash,
+        swapType: SwapType.NATIVE,
+      });
     }
-
-    const tx = await coinSwap.getFunction("claim(bytes32,uint256,address,address,uint256)")(
-      prefix0x(preimage),
-      Number(amount),
-      claimAddress,
-      refundAddress,
-      timelock
-    );
-
-    const receipt = await tx.wait();
-
-    return c.json({
-      success: true,
-      txHash: receipt.hash,
-    });
-
   } catch (error) {
     console.error("Claim failed:", error);
-    return c.json({ error: "Claim transaction failed", details: error instanceof Error ? error.message : String(error) }, 500);
+    return c.json({ 
+      error: "Claim transaction failed", 
+      details: error instanceof Error ? error.message : String(error) 
+    }, 500);
   }
 });
 
