@@ -7,6 +7,7 @@ import { CoinSwapABI } from "../../abis/CoinSwap";
 import { ERC20SwapABI } from "../../abis/ERC20Swap";
 import config from "../../ponder.config";
 import { createSigner, prefix0x } from "../utils/evm";
+import { SwapType } from "../utils/constants";
 
 const routes = new Hono();
 
@@ -58,7 +59,7 @@ routes.post("/help-me-claim", async (c: Context) => {
   const tokenAddress = lockupData.tokenAddress;
 
   try {
-    if (swapType === "erc20") {
+    if (swapType === SwapType.ERC20) {
       // ERC20 swap claim
       const erc20SwapAddress = config.contracts.ERC20SwapCitrea.address;
       const erc20Swap = new ethers.Contract(erc20SwapAddress, ERC20SwapABI, signer);
@@ -76,7 +77,7 @@ routes.post("/help-me-claim", async (c: Context) => {
       return c.json({
         success: true,
         txHash: receipt.hash,
-        swapType: "erc20",
+        swapType: SwapType.ERC20,
       });
     } else {
       // Native swap claim (CoinSwap)
@@ -96,7 +97,7 @@ routes.post("/help-me-claim", async (c: Context) => {
       return c.json({
         success: true,
         txHash: receipt.hash,
-        swapType: "native",
+        swapType: SwapType.NATIVE,
       });
     }
   } catch (error) {

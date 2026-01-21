@@ -1,5 +1,6 @@
 import { ponder } from "ponder:registry";
 import { lockups } from "../ponder.schema";
+import { SwapType } from "./utils/constants";
 
 ponder.on("CoinSwapAbi:Lockup", async ({ event, context }) => {
   await context.db.insert(lockups).values({
@@ -8,8 +9,7 @@ ponder.on("CoinSwapAbi:Lockup", async ({ event, context }) => {
     claimAddress: event.args.claimAddress,
     refundAddress: event.args.refundAddress,
     timelock: event.args.timelock,
-    tokenAddress: "",
-    swapType: "native",
+    swapType: SwapType.NATIVE,
   });
 });
 
@@ -40,7 +40,7 @@ ponder.on("ERC20SwapCitrea:Lockup", async ({ event, context }) => {
     refundAddress: event.args.refundAddress,
     timelock: event.args.timelock,
     tokenAddress: event.args.tokenAddress,
-    swapType: "erc20",
+    swapType: SwapType.ERC20,
   });
 });
 

@@ -25,7 +25,7 @@ export default createConfig({
       chain: "testnet",
       abi: ERC20SwapABI,
       address: "0xf2e019a371e5Fd32dB2fC564Ad9eAE9E433133cc",
-      startBlock: 18286296, // 
+      startBlock: 18286296, 
     },
   },
 });
