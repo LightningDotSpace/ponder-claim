@@ -64,10 +64,11 @@ routes.post("/help-me-claim", async (c: Context) => {
       const erc20SwapAddress = config.contracts.ERC20SwapCitrea.address;
       const erc20Swap = new ethers.Contract(erc20SwapAddress, ERC20SwapABI, signer);
 
-      const tx = await erc20Swap.getFunction("claim")(
+      const tx = await erc20Swap.getFunction("claim(bytes32,uint256,address,address,address,uint256)")(
         prefix0x(preimage),
         amount,
         tokenAddress,
+        claimAddress,
         refundAddress,
         timelock
       );
