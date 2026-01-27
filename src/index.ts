@@ -10,6 +10,7 @@ ponder.on("CoinSwapAbi:Lockup", async ({ event, context }) => {
     refundAddress: event.args.refundAddress,
     timelock: event.args.timelock,
     swapType: SwapType.NATIVE,
+    chainId: context.chain.id,
   });
 });
 
@@ -41,6 +42,7 @@ ponder.on("ERC20SwapCitrea:Lockup", async ({ event, context }) => {
     timelock: event.args.timelock,
     tokenAddress: event.args.tokenAddress,
     swapType: SwapType.ERC20,
+    chainId: context.chain.id,
   });
 });
 
