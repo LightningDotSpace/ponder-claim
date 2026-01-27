@@ -1,6 +1,6 @@
 import { ethers } from "ethers";
 
-const provider = new ethers.JsonRpcProvider("https://rpc.citreascan.com/");
+const provider = new ethers.JsonRpcProvider(process.env.RPC_PROVIDER_URL!);
 
 export function createSigner(privateKey: string) {
   const wallet = new ethers.Wallet(privateKey);
