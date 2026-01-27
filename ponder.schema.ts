@@ -13,4 +13,5 @@ export const lockups = onchainTable("lockups", (t) => ({
   claimTxHash: t.text(),
   refundTxHash: t.text(),
   preimage: t.text(),
+  chainId: t.integer(),
 }));

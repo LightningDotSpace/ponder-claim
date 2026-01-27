@@ -57,11 +57,13 @@ routes.post("/help-me-claim", async (c: Context) => {
   const timelock = lockupData.timelock;
   const swapType = lockupData.swapType;
   const tokenAddress = lockupData.tokenAddress;
+  const chainId = lockupData.chainId;
+  const chainName = chainId === 5115 ? "testnet" : "mainnet";
 
   try {
     if (swapType === SwapType.ERC20) {
       // ERC20 swap claim
-      const erc20SwapAddress = config.contracts.ERC20SwapCitrea.address;
+      const erc20SwapAddress = config.contracts.ERC20SwapCitrea.chain[chainName].address;
       const erc20Swap = new ethers.Contract(erc20SwapAddress, ERC20SwapABI, signer);
 
       const tx = await erc20Swap.getFunction("claim(bytes32,uint256,address,address,address,uint256)")(
@@ -82,7 +84,7 @@ routes.post("/help-me-claim", async (c: Context) => {
       });
     } else {
       // Native swap claim (CoinSwap)
-      const coinSwapAddress = config.contracts.CoinSwapAbi.address;
+      const coinSwapAddress = config.contracts.CoinSwapAbi.chain[chainName].address;
       const coinSwap = new ethers.Contract(coinSwapAddress, CoinSwapABI, signer);
 
       const tx = await coinSwap.getFunction("claim(bytes32,uint256,address,address,uint256)")(
