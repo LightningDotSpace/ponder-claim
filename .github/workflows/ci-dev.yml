@@ -3,12 +3,14 @@ name: Build and Push Docker Image (DEV)
 on:
   push:
     branches: [develop]
-  pull_request:
-    branches: [develop]
   workflow_dispatch:
 
 env:
   DOCKER_TAGS: dfxswiss/boltz-claim:beta
+  AZURE_RESOURCE_GROUP: rg-lds-api-dev
+  AZURE_VM_NAME: vm-lds-btc-dev
+  NODE_VERSION: 22.14.0
+  NODE_ENVIRONMENT: dev
 
 jobs:
   build-and-push:
@@ -42,3 +44,15 @@ jobs:
           tags: ${{ env.DOCKER_TAGS }}
           build-args: |
             COMMIT_HASH=${{ steps.sha.outputs.short }}
+
+      - name: Update Azure VM docker container
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            echo "Update docker container..."
+
+            az vm run-command invoke \
+              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+              --name ${{ env.AZURE_VM_NAME }} \
+              --command-id RunShellScript \
+              --scripts "/home/lds/update-boltz.sh claim"
