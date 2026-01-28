@@ -1,8 +1,9 @@
 import { ethers } from "ethers";
 import { CoinSwapABI } from "../../abis/CoinSwap";
 import { ERC20SwapABI } from "../../abis/ERC20Swap";
-import { createSigner, prefix0x } from "./evm";
+import { getSigner, prefix0x } from "./evm";
 import { SwapType } from "./constants";
+import { transactionQueue } from "./transactionQueue";
 
 const contractAddresses = {
   testnet: {
@@ -32,8 +33,6 @@ export async function executeAutoClaim(
   lockupData: LockupData,
   chainId: number
 ): Promise<{ success: boolean; txHash?: string; error?: string }> {
-  const signer = createSigner(process.env.SIGNER_PRIVATE_KEY!);
-
   // Validate chainId
   if (chainId !== 5115 && chainId !== 4114) {
     return { success: false, error: `Unsupported chainId: ${chainId}` };
@@ -51,36 +50,42 @@ export async function executeAutoClaim(
   }
 
   try {
-    if (swapType === SwapType.ERC20) {
-      const erc20SwapAddress = contractAddresses[chainName].ERC20SwapCitrea;
-      const erc20Swap = new ethers.Contract(erc20SwapAddress, ERC20SwapABI, signer);
+    const txHash = await transactionQueue.enqueue(async () => {
+      const signer = getSigner();
 
-      const tx = await erc20Swap.getFunction("claim(bytes32,uint256,address,address,address,uint256)")(
-        prefix0x(preimage),
-        amount,
-        tokenAddress,
-        claimAddress,
-        refundAddress,
-        timelock
-      );
+      if (swapType === SwapType.ERC20) {
+        const erc20SwapAddress = contractAddresses[chainName].ERC20SwapCitrea;
+        const erc20Swap = new ethers.Contract(erc20SwapAddress, ERC20SwapABI, signer);
 
-      const receipt = await tx.wait();
-      return { success: true, txHash: receipt.hash };
-    } else {
-      const coinSwapAddress = contractAddresses[chainName].CoinSwapAbi;
-      const coinSwap = new ethers.Contract(coinSwapAddress, CoinSwapABI, signer);
+        const tx = await erc20Swap.getFunction("claim(bytes32,uint256,address,address,address,uint256)")(
+          prefix0x(preimage),
+          amount,
+          tokenAddress,
+          claimAddress,
+          refundAddress,
+          timelock
+        );
 
-      const tx = await coinSwap.getFunction("claim(bytes32,uint256,address,address,uint256)")(
-        prefix0x(preimage),
-        Number(amount),
-        claimAddress,
-        refundAddress,
-        timelock
-      );
+        const receipt = await tx.wait();
+        return receipt.hash as string;
+      } else {
+        const coinSwapAddress = contractAddresses[chainName].CoinSwapAbi;
+        const coinSwap = new ethers.Contract(coinSwapAddress, CoinSwapABI, signer);
 
-      const receipt = await tx.wait();
-      return { success: true, txHash: receipt.hash };
-    }
+        const tx = await coinSwap.getFunction("claim(bytes32,uint256,address,address,uint256)")(
+          prefix0x(preimage),
+          amount,
+          claimAddress,
+          refundAddress,
+          timelock
+        );
+
+        const receipt = await tx.wait();
+        return receipt.hash as string;
+      }
+    });
+
+    return { success: true, txHash };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("Auto-claim failed:", errorMessage);

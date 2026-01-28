@@ -5,9 +5,10 @@ import { and, eq } from "ponder";
 import { ethers, formatEther } from "ethers";
 import { CoinSwapABI } from "../../abis/CoinSwap";
 import { ERC20SwapABI } from "../../abis/ERC20Swap";
-import { createSigner, prefix0x } from "../utils/evm";
+import { getSigner, prefix0x } from "../utils/evm";
 import { SwapType } from "../utils/constants";
 import { getPreimageStore } from "../utils/preimageStore";
+import { transactionQueue } from "../utils/transactionQueue";
 
 const contractAddresses = {
   testnet: {
@@ -67,8 +68,6 @@ routes.post("/register-preimage", async (c: Context) => {
 routes.post("/help-me-claim", async (c: Context) => {
   const { preimageHash, preimage } = await c.req.json();
 
-  const signer = createSigner(process.env.SIGNER_PRIVATE_KEY!);
-
   const lockup = await db.select().from(lockups).where(
     and(
       eq(lockups.preimageHash, preimageHash),
@@ -95,59 +94,57 @@ routes.post("/help-me-claim", async (c: Context) => {
   const chainName = chainId === 5115 ? "testnet" : "mainnet";
 
   try {
-    if (swapType === SwapType.ERC20) {
-      // ERC20 swap claim
-      const erc20SwapAddress = contractAddresses[chainName].ERC20SwapCitrea;
-      const erc20Swap = new ethers.Contract(erc20SwapAddress, ERC20SwapABI, signer);
+    const txHash = await transactionQueue.enqueue(async () => {
+      const signer = getSigner();
 
-      const tx = await erc20Swap.getFunction("claim(bytes32,uint256,address,address,address,uint256)")(
-        prefix0x(preimage),
-        amount,
-        tokenAddress,
-        claimAddress,
-        refundAddress,
-        timelock
-      );
+      if (swapType === SwapType.ERC20) {
+        const erc20SwapAddress = contractAddresses[chainName].ERC20SwapCitrea;
+        const erc20Swap = new ethers.Contract(erc20SwapAddress, ERC20SwapABI, signer);
 
-      const receipt = await tx.wait();
+        const tx = await erc20Swap.getFunction("claim(bytes32,uint256,address,address,address,uint256)")(
+          prefix0x(preimage),
+          amount,
+          tokenAddress,
+          claimAddress,
+          refundAddress,
+          timelock
+        );
 
-      return c.json({
-        success: true,
-        txHash: receipt.hash,
-        swapType: SwapType.ERC20,
-      });
-    } else {
-      // Native swap claim (CoinSwap)
-      const coinSwapAddress = contractAddresses[chainName].CoinSwapAbi;
-      const coinSwap = new ethers.Contract(coinSwapAddress, CoinSwapABI, signer);
+        const receipt = await tx.wait();
+        return { txHash: receipt.hash as string, swapType: SwapType.ERC20 };
+      } else {
+        const coinSwapAddress = contractAddresses[chainName].CoinSwapAbi;
+        const coinSwap = new ethers.Contract(coinSwapAddress, CoinSwapABI, signer);
 
-      const tx = await coinSwap.getFunction("claim(bytes32,uint256,address,address,uint256)")(
-        prefix0x(preimage),
-        Number(amount),
-        claimAddress,
-        refundAddress,
-        timelock
-      );
+        const tx = await coinSwap.getFunction("claim(bytes32,uint256,address,address,uint256)")(
+          prefix0x(preimage),
+          amount,
+          claimAddress,
+          refundAddress,
+          timelock
+        );
 
-      const receipt = await tx.wait();
+        const receipt = await tx.wait();
+        return { txHash: receipt.hash as string, swapType: SwapType.NATIVE };
+      }
+    });
 
-      return c.json({
-        success: true,
-        txHash: receipt.hash,
-        swapType: SwapType.NATIVE,
-      });
-    }
+    return c.json({
+      success: true,
+      txHash: txHash.txHash,
+      swapType: txHash.swapType,
+    });
   } catch (error) {
     console.error("Claim failed:", error);
-    return c.json({ 
-      error: "Claim transaction failed", 
-      details: error instanceof Error ? error.message : String(error) 
+    return c.json({
+      error: "Claim transaction failed",
+      details: error instanceof Error ? error.message : String(error)
     }, 500);
   }
 });
 
 routes.get("/wallet", async (c: Context) => {
-  const signer = createSigner(process.env.SIGNER_PRIVATE_KEY!);
+  const signer = getSigner();
   const address = await signer.getAddress();
   const balance = await signer.provider?.getBalance(address);
 

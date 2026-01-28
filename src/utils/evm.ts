@@ -2,9 +2,13 @@ import { ethers } from "ethers";
 
 const provider = new ethers.JsonRpcProvider(process.env.RPC_PROVIDER_URL!);
 
-export function createSigner(privateKey: string) {
-  const wallet = new ethers.Wallet(privateKey);
-  return wallet.connect(provider);
+let signer: ethers.Wallet | null = null;
+
+export function getSigner(): ethers.Wallet {
+  if (!signer) {
+    signer = new ethers.Wallet(process.env.SIGNER_PRIVATE_KEY!, provider);
+  }
+  return signer;
 }
 
 const weiFactor = BigInt(10 ** 10);
