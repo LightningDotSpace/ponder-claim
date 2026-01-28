@@ -33,6 +33,11 @@ export async function executeAutoClaim(
   chainId: number
 ): Promise<{ success: boolean; txHash?: string; error?: string }> {
   const signer = createSigner(process.env.SIGNER_PRIVATE_KEY!);
+
+  // Validate chainId
+  if (chainId !== 5115 && chainId !== 4114) {
+    return { success: false, error: `Unsupported chainId: ${chainId}` };
+  }
   const chainName = chainId === 5115 ? "testnet" : "mainnet";
 
   if (lockupData.claimed || lockupData.refunded) {

@@ -19,6 +19,9 @@ class PreimageStore {
   }
 
   private init(): void {
+    // Enable WAL mode for better concurrent read/write performance
+    this.db.pragma('journal_mode = WAL');
+
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS registered_preimages (
         preimage_hash TEXT PRIMARY KEY,

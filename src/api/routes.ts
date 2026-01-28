@@ -89,7 +89,10 @@ routes.post("/help-me-claim", async (c: Context) => {
   const swapType = lockupData.swapType;
   const tokenAddress = lockupData.tokenAddress;
   const chainId = lockupData.chainId;
-  const chainName = (chainId === 5115 ? "testnet" : "mainnet") as "testnet" | "mainnet";
+  if (chainId !== 5115 && chainId !== 4114) {
+    return c.json({ error: `Unsupported chainId: ${chainId}` }, 400);
+  }
+  const chainName = chainId === 5115 ? "testnet" : "mainnet";
 
   try {
     if (swapType === SwapType.ERC20) {
