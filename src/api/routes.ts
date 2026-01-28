@@ -5,9 +5,20 @@ import { and, eq } from "ponder";
 import { ethers, formatEther } from "ethers";
 import { CoinSwapABI } from "../../abis/CoinSwap";
 import { ERC20SwapABI } from "../../abis/ERC20Swap";
-import config from "../../ponder.config";
 import { createSigner, prefix0x } from "../utils/evm";
 import { SwapType } from "../utils/constants";
+import { getPreimageStore } from "../utils/preimageStore";
+
+const contractAddresses = {
+  testnet: {
+    CoinSwapAbi: "0xd02731fD8c5FDD53B613A699234FAd5EE8851B65",
+    ERC20SwapCitrea: "0xf2e019a371e5Fd32dB2fC564Ad9eAE9E433133cc",
+  },
+  mainnet: {
+    CoinSwapAbi: "0xfd92f846fe6e7d08d28d6a88676bb875e5d906ab",
+    ERC20SwapCitrea: "0x7397f25f230f7d5a83c18e1b68b32511bf35f860",
+  },
+};
 
 const routes = new Hono();
 
@@ -31,6 +42,26 @@ routes.get("/check-preimagehash", async (c: Context) => {
       timelock: data.timelock?.toString()
     }
   });
+});
+
+routes.post("/register-preimage", async (c: Context) => {
+  const { preimageHash, preimage, swapId } = await c.req.json();
+
+  if (!preimageHash || !preimage) {
+    return c.json({ error: "preimageHash and preimage required" }, 400);
+  }
+
+  try {
+    const store = getPreimageStore();
+    store.register(prefix0x(preimageHash), prefix0x(preimage), swapId);
+    return c.json({ success: true });
+  } catch (error) {
+    console.error("Failed to register preimage:", error);
+    return c.json({
+      error: "Failed to register preimage",
+      details: error instanceof Error ? error.message : String(error),
+    }, 500);
+  }
 });
 
 routes.post("/help-me-claim", async (c: Context) => {
@@ -58,12 +89,12 @@ routes.post("/help-me-claim", async (c: Context) => {
   const swapType = lockupData.swapType;
   const tokenAddress = lockupData.tokenAddress;
   const chainId = lockupData.chainId;
-  const chainName = chainId === 5115 ? "testnet" : "mainnet";
+  const chainName = (chainId === 5115 ? "testnet" : "mainnet") as "testnet" | "mainnet";
 
   try {
     if (swapType === SwapType.ERC20) {
       // ERC20 swap claim
-      const erc20SwapAddress = config.contracts.ERC20SwapCitrea.chain[chainName].address;
+      const erc20SwapAddress = contractAddresses[chainName].ERC20SwapCitrea;
       const erc20Swap = new ethers.Contract(erc20SwapAddress, ERC20SwapABI, signer);
 
       const tx = await erc20Swap.getFunction("claim(bytes32,uint256,address,address,address,uint256)")(
@@ -84,7 +115,7 @@ routes.post("/help-me-claim", async (c: Context) => {
       });
     } else {
       // Native swap claim (CoinSwap)
-      const coinSwapAddress = config.contracts.CoinSwapAbi.chain[chainName].address;
+      const coinSwapAddress = contractAddresses[chainName].CoinSwapAbi;
       const coinSwap = new ethers.Contract(coinSwapAddress, CoinSwapABI, signer);
 
       const tx = await coinSwap.getFunction("claim(bytes32,uint256,address,address,uint256)")(
