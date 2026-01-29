@@ -1,7 +1,10 @@
-import { onchainTable } from "ponder";
+import { onchainTable, index } from "ponder";
 
 export const lockups = onchainTable("lockups", (t) => ({
-  preimageHash: t.text().primaryKey(),
+  // Composite ID: chainId:preimageHash
+  id: t.text().primaryKey(),
+  preimageHash: t.text().notNull(),
+  chainId: t.integer().notNull(),
   amount: t.bigint(),
   claimAddress: t.text(),
   refundAddress: t.text(),
@@ -13,5 +16,6 @@ export const lockups = onchainTable("lockups", (t) => ({
   claimTxHash: t.text(),
   refundTxHash: t.text(),
   preimage: t.text(),
-  chainId: t.integer(),
+}), (table) => ({
+  preimageHashIdx: index().on(table.preimageHash),
 }));

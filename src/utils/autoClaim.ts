@@ -5,14 +5,20 @@ import { getSigner, prefix0x } from "./evm";
 import { SwapType } from "./constants";
 import { transactionQueue } from "./transactionQueue";
 
-const contractAddresses = {
-  testnet: {
-    CoinSwapAbi: "0xd02731fD8c5FDD53B613A699234FAd5EE8851B65",
-    ERC20SwapCitrea: "0xf2e019a371e5Fd32dB2fC564Ad9eAE9E433133cc",
+const CONTRACT_ADDRESSES: Record<number, { coinSwap?: string; erc20Swap: string }> = {
+  4114: { // Citrea Mainnet
+    coinSwap: "0xFD92F846fe6E7d08d28D6A88676BB875E5D906ab",
+    erc20Swap: "0x7397F25F230f7d5A83c18e1B68b32511bf35F860",
   },
-  mainnet: {
-    CoinSwapAbi: "0xfd92f846fe6e7d08d28d6a88676bb875e5d906ab",
-    ERC20SwapCitrea: "0x7397f25f230f7d5a83c18e1b68b32511bf35f860",
+  5115: { // Citrea Testnet
+    coinSwap: "0xd02731fD8c5FDD53B613A699234FAd5EE8851B65",
+    erc20Swap: "0xf2e019a371e5Fd32dB2fC564Ad9eAE9E433133cc",
+  },
+  137: { // Polygon
+    erc20Swap: "0x2E21F58Da58c391F110467c7484EdfA849C1CB9B",
+  },
+  1: { // Ethereum
+    erc20Swap: "0x2E21F58Da58c391F110467c7484EdfA849C1CB9B",
   },
 };
 
@@ -33,11 +39,10 @@ export async function executeAutoClaim(
   lockupData: LockupData,
   chainId: number
 ): Promise<{ success: boolean; txHash?: string; error?: string }> {
-  // Validate chainId
-  if (chainId !== 5115 && chainId !== 4114) {
+  const contracts = CONTRACT_ADDRESSES[chainId];
+  if (!contracts) {
     return { success: false, error: `Unsupported chainId: ${chainId}` };
   }
-  const chainName = chainId === 5115 ? "testnet" : "mainnet";
 
   if (lockupData.claimed || lockupData.refunded) {
     return { success: false, error: "Lockup already claimed or refunded" };
@@ -51,11 +56,10 @@ export async function executeAutoClaim(
 
   try {
     const txHash = await transactionQueue.enqueue(async () => {
-      const signer = getSigner();
+      const signer = getSigner(chainId);
 
-      if (swapType === SwapType.ERC20) {
-        const erc20SwapAddress = contractAddresses[chainName].ERC20SwapCitrea;
-        const erc20Swap = new ethers.Contract(erc20SwapAddress, ERC20SwapABI, signer);
+      if (swapType === SwapType.ERC20 || tokenAddress) {
+        const erc20Swap = new ethers.Contract(contracts.erc20Swap, ERC20SwapABI, signer);
 
         const tx = await erc20Swap.getFunction("claim(bytes32,uint256,address,address,address,uint256)")(
           prefix0x(preimage),
@@ -68,9 +72,8 @@ export async function executeAutoClaim(
 
         const receipt = await tx.wait();
         return receipt.hash as string;
-      } else {
-        const coinSwapAddress = contractAddresses[chainName].CoinSwapAbi;
-        const coinSwap = new ethers.Contract(coinSwapAddress, CoinSwapABI, signer);
+      } else if (contracts.coinSwap) {
+        const coinSwap = new ethers.Contract(contracts.coinSwap, CoinSwapABI, signer);
 
         const tx = await coinSwap.getFunction("claim(bytes32,uint256,address,address,uint256)")(
           prefix0x(preimage),
@@ -82,13 +85,15 @@ export async function executeAutoClaim(
 
         const receipt = await tx.wait();
         return receipt.hash as string;
+      } else {
+        throw new Error(`No CoinSwap contract for chainId ${chainId}`);
       }
     });
 
     return { success: true, txHash };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error("Auto-claim failed:", errorMessage);
+    console.error(`Auto-claim failed on chain ${chainId}:`, errorMessage);
     return { success: false, error: errorMessage };
   }
 }

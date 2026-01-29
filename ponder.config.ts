@@ -1,52 +1,82 @@
 import { createConfig, rateLimit } from "ponder";
-
-import { CoinSwapABI } from "./abis/CoinSwap";
+import { http } from "viem";
 import { ERC20SwapABI } from "./abis/ERC20Swap";
+import { CoinSwapABI } from "./abis/CoinSwap";
 import { citreaTransport } from "./citrea-transport-fix";
 
-const rpcProviderUrl = process.env.RPC_PROVIDER_URL!;
 const targetChain = (process.env.TARGET_CHAIN as "testnet" | "mainnet") || "mainnet";
 
-const chainIds = {
-  testnet: 5115,
-  mainnet: 4114,
-}
-
-const contractAddresses = {
+const config = {
   testnet: {
-    CoinSwapAbi: "0xd02731fD8c5FDD53B613A699234FAd5EE8851B65" as `0x${string}`,
-    ERC20SwapCitrea: "0xf2e019a371e5Fd32dB2fC564Ad9eAE9E433133cc" as `0x${string}`,
+    citrea: { chainId: 5115, rpc: process.env.RPC_CITREA_TESTNET! },
+    polygon: { chainId: 137, rpc: process.env.RPC_POLYGON! },
+    ethereum: { chainId: 1, rpc: process.env.RPC_ETHEREUM! },
+    contracts: {
+      citreaERC20: "0xf2e019a371e5Fd32dB2fC564Ad9eAE9E433133cc",
+      citreaCoin: "0xd02731fD8c5FDD53B613A699234FAd5EE8851B65",
+      polygonERC20: "0x2E21F58Da58c391F110467c7484EdfA849C1CB9B",
+      ethereumERC20: "0x2E21F58Da58c391F110467c7484EdfA849C1CB9B",
+    },
+    startBlocks: { citrea: 18332348, polygon: 50000000, ethereum: 19000000 },
   },
   mainnet: {
-    CoinSwapAbi: "0xfd92f846fe6e7d08d28d6a88676bb875e5d906ab" as `0x${string}`,
-    ERC20SwapCitrea: "0x7397f25f230f7d5a83c18e1b68b32511bf35f860" as `0x${string}`,
+    citrea: { chainId: 4114, rpc: process.env.RPC_CITREA_MAINNET! },
+    polygon: { chainId: 137, rpc: process.env.RPC_POLYGON! },
+    ethereum: { chainId: 1, rpc: process.env.RPC_ETHEREUM! },
+    contracts: {
+      citreaERC20: "0x7397F25F230f7d5A83c18e1B68b32511bf35F860",
+      citreaCoin: "0xFD92F846fe6E7d08d28D6A88676BB875E5D906ab",
+      polygonERC20: "0x2E21F58Da58c391F110467c7484EdfA849C1CB9B",
+      ethereumERC20: "0x2E21F58Da58c391F110467c7484EdfA849C1CB9B",
+    },
+    startBlocks: { citrea: 2684260, polygon: 50000000, ethereum: 19000000 },
   },
-}
+};
 
-const startBlocks = {
-  testnet: 18332348,
-  mainnet: 2684260,
-}
+const c = config[targetChain];
+
 export default createConfig({
+  ordering: "multichain",
   chains: {
-    [targetChain]: {
-      id: chainIds[targetChain],
-      rpc: rateLimit(citreaTransport(rpcProviderUrl), {
-        requestsPerSecond: 10,
-      }),
+    citrea: {
+      id: c.citrea.chainId,
+      rpc: rateLimit(citreaTransport(c.citrea.rpc), { requestsPerSecond: 10 }),
+    },
+    polygon: {
+      id: c.polygon.chainId,
+      rpc: rateLimit(http(c.polygon.rpc), { requestsPerSecond: 25 }),
+    },
+    ethereum: {
+      id: c.ethereum.chainId,
+      rpc: rateLimit(http(c.ethereum.rpc), { requestsPerSecond: 25 }),
     },
   },
   contracts: {
-    CoinSwapAbi: {
-      chain: targetChain,
-      address: contractAddresses[targetChain].CoinSwapAbi,
-      startBlock: startBlocks[targetChain],
+    // Citrea Contracts (existing, renamed)
+    CoinSwapCitrea: {
+      chain: "citrea",
+      address: c.contracts.citreaCoin as `0x${string}`,
+      startBlock: c.startBlocks.citrea,
       abi: CoinSwapABI,
     },
     ERC20SwapCitrea: {
-      chain: targetChain,
-      address: contractAddresses[targetChain].ERC20SwapCitrea,
-      startBlock: startBlocks[targetChain],
+      chain: "citrea",
+      address: c.contracts.citreaERC20 as `0x${string}`,
+      startBlock: c.startBlocks.citrea,
+      abi: ERC20SwapABI,
+    },
+    // Polygon Contract (new)
+    ERC20SwapPolygon: {
+      chain: "polygon",
+      address: c.contracts.polygonERC20 as `0x${string}`,
+      startBlock: c.startBlocks.polygon,
+      abi: ERC20SwapABI,
+    },
+    // Ethereum Contract (new)
+    ERC20SwapEthereum: {
+      chain: "ethereum",
+      address: c.contracts.ethereumERC20 as `0x${string}`,
+      startBlock: c.startBlocks.ethereum,
       abi: ERC20SwapABI,
     },
   },

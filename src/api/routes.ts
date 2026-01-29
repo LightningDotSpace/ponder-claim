@@ -10,16 +10,26 @@ import { SwapType } from "../utils/constants";
 import { getPreimageStore } from "../utils/preimageStore";
 import { transactionQueue } from "../utils/transactionQueue";
 
-const contractAddresses = {
-  testnet: {
-    CoinSwapAbi: "0xd02731fD8c5FDD53B613A699234FAd5EE8851B65",
-    ERC20SwapCitrea: "0xf2e019a371e5Fd32dB2fC564Ad9eAE9E433133cc",
+const CONTRACT_ADDRESSES: Record<number, { coinSwap?: string; erc20Swap: string }> = {
+  4114: { // Citrea Mainnet
+    coinSwap: "0xFD92F846fe6E7d08d28D6A88676BB875E5D906ab",
+    erc20Swap: "0x7397F25F230f7d5A83c18e1B68b32511bf35F860",
   },
-  mainnet: {
-    CoinSwapAbi: "0xfd92f846fe6e7d08d28d6a88676bb875e5d906ab",
-    ERC20SwapCitrea: "0x7397f25f230f7d5a83c18e1b68b32511bf35f860",
+  5115: { // Citrea Testnet
+    coinSwap: "0xd02731fD8c5FDD53B613A699234FAd5EE8851B65",
+    erc20Swap: "0xf2e019a371e5Fd32dB2fC564Ad9eAE9E433133cc",
+  },
+  137: { // Polygon
+    erc20Swap: "0x2E21F58Da58c391F110467c7484EdfA849C1CB9B",
+  },
+  1: { // Ethereum
+    erc20Swap: "0x2E21F58Da58c391F110467c7484EdfA849C1CB9B",
   },
 };
+
+// Helper to create composite lockup ID
+const createLockupId = (chainId: number, preimageHash: string) =>
+  `${chainId}:${preimageHash}`;
 
 const routes = new Hono();
 
@@ -29,7 +39,7 @@ const routes = new Hono();
  * Default is: 5x2 seconds
  */
 async function waitForClaimedLockup(
-  preimageHash: string,
+  lockupId: string,
   maxAttempts = 5,
   delayMs = 2000
 ): Promise<{ txHash: string; swapType: string | null } | null> {
@@ -37,7 +47,7 @@ async function waitForClaimedLockup(
     await new Promise(resolve => setTimeout(resolve, delayMs));
 
     const lockup = await db.select().from(lockups)
-      .where(eq(lockups.preimageHash, preimageHash))
+      .where(eq(lockups.id, lockupId))
       .limit(1);
 
     if (lockup[0]?.claimed && lockup[0]?.claimTxHash) {
@@ -52,36 +62,80 @@ async function waitForClaimedLockup(
 
 routes.get("/check-preimagehash", async (c: Context) => {
   const preimageHash = c.req.query("preimageHash");
+  const chainIdParam = c.req.query("chainId");
+
   if (!preimageHash) {
     return c.json({ error: "Preimage hash is required" }, 400);
   }
 
-  const lockup = await db.select().from(lockups).where(eq(lockups.preimageHash, prefix0x(preimageHash))).limit(1);
+  const normalizedHash = prefix0x(preimageHash);
 
-  if (!lockup.length) {
+  // If chainId is provided, look up specific lockup
+  if (chainIdParam) {
+    const chainId = parseInt(chainIdParam, 10);
+    if (isNaN(chainId)) {
+      return c.json({ error: "Invalid chainId" }, 400);
+    }
+
+    const lockupId = createLockupId(chainId, normalizedHash);
+    const lockup = await db.select().from(lockups).where(eq(lockups.id, lockupId)).limit(1);
+
+    if (!lockup.length) {
+      return c.json({ error: "Lockup not found" }, 404);
+    }
+
+    const data = lockup[0]!;
+    return c.json({
+      lockup: {
+        ...data,
+        amount: data.amount?.toString(),
+        timelock: data.timelock?.toString()
+      }
+    });
+  }
+
+  // Without chainId, search by preimageHash and return all matches
+  const allLockups = await db.select().from(lockups).where(eq(lockups.preimageHash, normalizedHash));
+
+  if (!allLockups.length) {
     return c.json({ error: "Lockup not found" }, 404);
   }
 
-  const data = lockup[0]!;
   return c.json({
-    lockup: {
+    lockups: allLockups.map(data => ({
       ...data,
       amount: data.amount?.toString(),
       timelock: data.timelock?.toString()
-    }
+    }))
   });
 });
 
 routes.post("/register-preimage", async (c: Context) => {
-  const { preimageHash, preimage, swapId } = await c.req.json();
+  const { preimageHash, preimage, swapId, customerAddress, targetChainId } = await c.req.json();
 
   if (!preimageHash || !preimage) {
     return c.json({ error: "preimageHash and preimage required" }, 400);
   }
 
+  // For outflow swaps: customerAddress and targetChainId required
+  if (targetChainId && !customerAddress) {
+    return c.json({ error: "customerAddress required when targetChainId is specified" }, 400);
+  }
+
+  // Validate targetChainId if provided
+  if (targetChainId && !CONTRACT_ADDRESSES[targetChainId]) {
+    return c.json({ error: `Unsupported targetChainId: ${targetChainId}` }, 400);
+  }
+
   try {
     const store = getPreimageStore();
-    store.register(prefix0x(preimageHash), prefix0x(preimage), swapId);
+    store.register(
+      prefix0x(preimageHash),
+      prefix0x(preimage),
+      swapId,
+      customerAddress,
+      targetChainId
+    );
     return c.json({ success: true });
   } catch (error) {
     console.error("Failed to register preimage:", error);
@@ -93,17 +147,35 @@ routes.post("/register-preimage", async (c: Context) => {
 });
 
 routes.post("/help-me-claim", async (c: Context) => {
-  const { preimageHash, preimage } = await c.req.json();
+  const { preimageHash, preimage, chainId: requestedChainId } = await c.req.json();
 
-  const lockup = await db.select().from(lockups).where(
-    eq(lockups.preimageHash, preimageHash)
-  ).limit(1);
-
-  if (!lockup.length) {
-    return c.json({ error: "Lockup not found" }, 404);
+  if (!preimageHash) {
+    return c.json({ error: "preimageHash is required" }, 400);
   }
 
-  const lockupData = lockup[0]!;
+  const normalizedHash = prefix0x(preimageHash);
+
+  // Find the lockup - either by specific chainId or search all
+  let lockupData;
+  let lockupId: string;
+
+  if (requestedChainId) {
+    lockupId = createLockupId(requestedChainId, normalizedHash);
+    const lockup = await db.select().from(lockups).where(eq(lockups.id, lockupId)).limit(1);
+    lockupData = lockup[0];
+  } else {
+    // Search by preimageHash across all chains
+    const allLockups = await db.select().from(lockups).where(eq(lockups.preimageHash, normalizedHash));
+    // Find an unclaimed lockup
+    lockupData = allLockups.find(l => !l.claimed && !l.refunded) || allLockups[0];
+    if (lockupData) {
+      lockupId = lockupData.id;
+    }
+  }
+
+  if (!lockupData) {
+    return c.json({ error: "Lockup not found" }, 404);
+  }
 
   // Already claimed - return existing txHash
   if (lockupData.claimed && lockupData.claimTxHash) {
@@ -111,6 +183,7 @@ routes.post("/help-me-claim", async (c: Context) => {
       success: true,
       txHash: lockupData.claimTxHash,
       swapType: lockupData.swapType,
+      chainId: lockupData.chainId,
     });
   }
 
@@ -118,25 +191,24 @@ routes.post("/help-me-claim", async (c: Context) => {
   if (lockupData.refunded) {
     return c.json({ error: "Swap was refunded" }, 409);
   }
-  const amount = lockupData.amount;
-  const claimAddress = lockupData.claimAddress;
-  const refundAddress = lockupData.refundAddress;
-  const timelock = lockupData.timelock;
-  const swapType = lockupData.swapType;
-  const tokenAddress = lockupData.tokenAddress;
-  const chainId = lockupData.chainId;
-  if (chainId !== 5115 && chainId !== 4114) {
+
+  const { amount, claimAddress, refundAddress, timelock, swapType, tokenAddress, chainId } = lockupData;
+
+  if (!chainId) {
+    return c.json({ error: "Missing chainId in lockup data" }, 500);
+  }
+
+  const contracts = CONTRACT_ADDRESSES[chainId];
+  if (!contracts) {
     return c.json({ error: `Unsupported chainId: ${chainId}` }, 400);
   }
-  const chainName = chainId === 5115 ? "testnet" : "mainnet";
 
   try {
-    const txHash = await transactionQueue.enqueue(async () => {
-      const signer = getSigner();
+    const result = await transactionQueue.enqueue(async () => {
+      const signer = getSigner(chainId);
 
-      if (swapType === SwapType.ERC20) {
-        const erc20SwapAddress = contractAddresses[chainName].ERC20SwapCitrea;
-        const erc20Swap = new ethers.Contract(erc20SwapAddress, ERC20SwapABI, signer);
+      if (swapType === SwapType.ERC20 || tokenAddress) {
+        const erc20Swap = new ethers.Contract(contracts.erc20Swap, ERC20SwapABI, signer);
 
         const tx = await erc20Swap.getFunction("claim(bytes32,uint256,address,address,address,uint256)")(
           prefix0x(preimage),
@@ -149,9 +221,8 @@ routes.post("/help-me-claim", async (c: Context) => {
 
         const receipt = await tx.wait();
         return { txHash: receipt.hash as string, swapType: SwapType.ERC20 };
-      } else {
-        const coinSwapAddress = contractAddresses[chainName].CoinSwapAbi;
-        const coinSwap = new ethers.Contract(coinSwapAddress, CoinSwapABI, signer);
+      } else if (contracts.coinSwap) {
+        const coinSwap = new ethers.Contract(contracts.coinSwap, CoinSwapABI, signer);
 
         const tx = await coinSwap.getFunction("claim(bytes32,uint256,address,address,uint256)")(
           prefix0x(preimage),
@@ -163,25 +234,29 @@ routes.post("/help-me-claim", async (c: Context) => {
 
         const receipt = await tx.wait();
         return { txHash: receipt.hash as string, swapType: SwapType.NATIVE };
+      } else {
+        throw new Error(`No CoinSwap contract for chainId ${chainId}`);
       }
     });
 
     return c.json({
       success: true,
-      txHash: txHash.txHash,
-      swapType: txHash.swapType,
+      txHash: result.txHash,
+      swapType: result.swapType,
+      chainId,
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
 
     // Check if already claimed (race condition: Auto-Claim finished but Claim Event not yet processed)
     if (errorMessage.includes("no tokens locked") || errorMessage.includes("no Ether locked")) {
-      const claimedLockup = await waitForClaimedLockup(preimageHash);
+      const claimedLockup = await waitForClaimedLockup(lockupId!);
       if (claimedLockup) {
         return c.json({
           success: true,
           txHash: claimedLockup.txHash,
           swapType: claimedLockup.swapType,
+          chainId,
         });
       }
     }
@@ -195,11 +270,58 @@ routes.post("/help-me-claim", async (c: Context) => {
 });
 
 routes.get("/wallet", async (c: Context) => {
-  const signer = getSigner();
-  const address = await signer.getAddress();
-  const balance = await signer.provider?.getBalance(address);
+  const chainIdParam = c.req.query("chainId");
 
-  return c.json({ address, balance: formatEther(balance?.toString() || "0n") });
+  // Default to Citrea mainnet if no chainId provided
+  const chainId = chainIdParam ? parseInt(chainIdParam, 10) : 4114;
+
+  if (isNaN(chainId) || !CONTRACT_ADDRESSES[chainId]) {
+    return c.json({ error: `Unsupported chainId: ${chainIdParam}` }, 400);
+  }
+
+  try {
+    const signer = getSigner(chainId);
+    const address = await signer.getAddress();
+    const balance = await signer.provider?.getBalance(address);
+
+    return c.json({
+      address,
+      balance: formatEther(balance?.toString() || "0"),
+      chainId,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return c.json({
+      error: "Failed to get wallet info",
+      details: errorMessage
+    }, 500);
+  }
+});
+
+// New endpoint: Get wallet balances across all chains
+routes.get("/wallet/all", async (c: Context) => {
+  const results: Record<number, { address: string; balance: string; error?: string }> = {};
+
+  for (const chainId of Object.keys(CONTRACT_ADDRESSES).map(Number)) {
+    try {
+      const signer = getSigner(chainId);
+      const address = await signer.getAddress();
+      const balance = await signer.provider?.getBalance(address);
+      results[chainId] = {
+        address,
+        balance: formatEther(balance?.toString() || "0"),
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      results[chainId] = {
+        address: "",
+        balance: "0",
+        error: errorMessage,
+      };
+    }
+  }
+
+  return c.json({ wallets: results });
 });
 
 export default routes;
