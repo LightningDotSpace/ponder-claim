@@ -35,11 +35,25 @@ async function handleAutoClaimForLockup(
 
   if (!registered) return;
 
-  const shouldClaim =
-    registered.targetChainId === lockupData.chainId &&
-    registered.customerAddress?.toLowerCase() === lockupData.claimAddress.toLowerCase();
+  // Check if this is an outflow swap (targetChainId is NOT NULL in DB)
+  const isOutflowSwap = registered.targetChainId !== null;
 
-  if (!shouldClaim) return;
+  if (isOutflowSwap) {
+    // Outflow swap: Validate chain and address match
+    const chainMatches = registered.targetChainId === lockupData.chainId;
+    const addressMatches = registered.customerAddress?.toLowerCase() === lockupData.claimAddress.toLowerCase();
+
+    if (!chainMatches) {
+      console.log(`${chainLabel}Auto-claim skipped for ${lockupData.preimageHash}: chain mismatch (expected: ${registered.targetChainId}, got: ${lockupData.chainId})`);
+      return;
+    }
+
+    if (!addressMatches) {
+      console.log(`${chainLabel}Auto-claim skipped for ${lockupData.preimageHash}: address mismatch (expected: ${registered.customerAddress}, got: ${lockupData.claimAddress})`);
+      return;
+    }
+  }
+  // Inflow swaps (targetChainId === null): Always proceed with claim (legacy behavior)
 
   // CRITICAL: Atomically mark as 'in_progress' BEFORE starting the claim.
   // This prevents race conditions where multiple lockup events (or duplicate events)
