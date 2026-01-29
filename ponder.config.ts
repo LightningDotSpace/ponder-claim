@@ -9,9 +9,9 @@ const targetChain = (process.env.TARGET_CHAIN as "testnet" | "mainnet") || "main
 
 const config = {
   testnet: {
-    citrea: { chainId: CHAIN_IDS.CITREA_TESTNET, rpc: CHAIN_RPC_URLS[CHAIN_IDS.CITREA_TESTNET]! },
-    polygon: { chainId: CHAIN_IDS.POLYGON_TESTNET_AMOY, rpc: CHAIN_RPC_URLS[CHAIN_IDS.POLYGON_TESTNET_AMOY]! },
-    ethereum: { chainId: CHAIN_IDS.ETHEREUM_MAINNET, rpc: CHAIN_RPC_URLS[CHAIN_IDS.ETHEREUM_MAINNET]! },
+    citrea: { chainId: CHAIN_IDS.CITREA_TESTNET },
+    polygon: { chainId: CHAIN_IDS.POLYGON_TESTNET_AMOY },
+    ethereum: { chainId: CHAIN_IDS.ETHEREUM_MAINNET },
     contracts: {
       citreaERC20: CONTRACT_ADDRESSES[CHAIN_IDS.CITREA_TESTNET]!.erc20Swap,
       citreaCoin: CONTRACT_ADDRESSES[CHAIN_IDS.CITREA_TESTNET]!.coinSwap!,
@@ -21,16 +21,16 @@ const config = {
     startBlocks: { citrea: 18332348, polygon: 50000000, ethereum: 19000000 },
   },
   mainnet: {
-    citrea: { chainId: CHAIN_IDS.CITREA_MAINNET, rpc: CHAIN_RPC_URLS[CHAIN_IDS.CITREA_MAINNET]! },
-    polygon: { chainId: CHAIN_IDS.POLYGON_MAINNET, rpc: CHAIN_RPC_URLS[CHAIN_IDS.POLYGON_MAINNET]! },
-    ethereum: { chainId: CHAIN_IDS.ETHEREUM_MAINNET, rpc: CHAIN_RPC_URLS[CHAIN_IDS.ETHEREUM_MAINNET]! },
+    citrea: { chainId: CHAIN_IDS.CITREA_MAINNET },
+    polygon: { chainId: CHAIN_IDS.POLYGON_MAINNET },
+    ethereum: { chainId: CHAIN_IDS.ETHEREUM_MAINNET },
     contracts: {
       citreaERC20: CONTRACT_ADDRESSES[CHAIN_IDS.CITREA_MAINNET]!.erc20Swap,
       citreaCoin: CONTRACT_ADDRESSES[CHAIN_IDS.CITREA_MAINNET]!.coinSwap!,
       polygonERC20: CONTRACT_ADDRESSES[CHAIN_IDS.POLYGON_MAINNET]!.erc20Swap,
       ethereumERC20: CONTRACT_ADDRESSES[CHAIN_IDS.ETHEREUM_MAINNET]!.erc20Swap,
     },
-    startBlocks: { citrea: 2684260, polygon: 50000000, ethereum: 19000000 },
+    startBlocks: { citrea: 2684260, polygon: 79223609, ethereum: 23832830 },
   },
 };
 
@@ -41,15 +41,15 @@ export default createConfig({
   chains: {
     citrea: {
       id: c.citrea.chainId,
-      rpc: rateLimit(citreaTransport(c.citrea.rpc), { requestsPerSecond: 10 }),
+      rpc: rateLimit(citreaTransport(CHAIN_RPC_URLS[c.citrea.chainId]!), { requestsPerSecond: 10 }),
     },
     polygon: {
       id: c.polygon.chainId,
-      rpc: rateLimit(http(c.polygon.rpc), { requestsPerSecond: 25 }),
+      rpc: rateLimit(http(CHAIN_RPC_URLS[c.polygon.chainId]!), { requestsPerSecond: 25 }),
     },
     ethereum: {
       id: c.ethereum.chainId,
-      rpc: rateLimit(http(c.ethereum.rpc), { requestsPerSecond: 25 }),
+      rpc: rateLimit(http(CHAIN_RPC_URLS[c.ethereum.chainId]!), { requestsPerSecond: 25 }),
     },
   },
   contracts: {
@@ -66,14 +66,12 @@ export default createConfig({
       startBlock: c.startBlocks.citrea,
       abi: ERC20SwapABI,
     },
-    // Polygon Contract (new)
     ERC20SwapPolygon: {
       chain: "polygon",
       address: c.contracts.polygonERC20 as `0x${string}`,
       startBlock: c.startBlocks.polygon,
       abi: ERC20SwapABI,
     },
-    // Ethereum Contract (new)
     ERC20SwapEthereum: {
       chain: "ethereum",
       address: c.contracts.ethereumERC20 as `0x${string}`,
