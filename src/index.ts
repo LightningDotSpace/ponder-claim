@@ -8,11 +8,73 @@ import { getPreimageStore } from "./utils/preimageStore";
 const createLockupId = (chainId: number, preimageHash: string) =>
   `${chainId}:${preimageHash}`;
 
+interface LockupData {
+  id: string;
+  preimageHash: string;
+  amount: bigint;
+  claimAddress: string;
+  refundAddress: string;
+  timelock: bigint;
+  swapType: string;
+  chainId: number;
+  tokenAddress: string | null;
+  claimed: boolean;
+  refunded: boolean;
+}
+
+/**
+ * Handles auto-claim logic for lockup events.
+ * CRITICAL: Marks preimage as 'in_progress' BEFORE starting the claim to prevent race conditions.
+ */
+async function handleAutoClaimForLockup(
+  lockupData: LockupData,
+  chainLabel: string = ""
+): Promise<void> {
+  const store = getPreimageStore();
+  const registered = store.get(lockupData.preimageHash);
+
+  if (!registered) return;
+
+  const shouldClaim =
+    registered.targetChainId === lockupData.chainId &&
+    registered.customerAddress?.toLowerCase() === lockupData.claimAddress.toLowerCase();
+
+  if (!shouldClaim) return;
+
+  // CRITICAL: Atomically mark as 'in_progress' BEFORE starting the claim.
+  // This prevents race conditions where multiple lockup events (or duplicate events)
+  // try to claim the same preimage simultaneously.
+  const acquired = store.markInProgress(lockupData.preimageHash);
+  if (!acquired) {
+    console.log(`${chainLabel}Auto-claim skipped for ${lockupData.preimageHash}: already in progress or completed`);
+    return;
+  }
+
+  try {
+    const result = await executeAutoClaim(registered.preimage, lockupData, lockupData.chainId);
+
+    if (result.success) {
+      console.log(`${chainLabel}Auto-claim successful for ${lockupData.preimageHash}: ${result.txHash}`);
+      store.markCompleted(lockupData.preimageHash);
+    } else if (result.error?.includes("no Ether locked") || result.error?.includes("no tokens locked")) {
+      console.log(`${chainLabel}Auto-claim skipped for ${lockupData.preimageHash}: already claimed`);
+      store.markCompleted(lockupData.preimageHash);
+    } else {
+      console.error(`${chainLabel}Auto-claim failed for ${lockupData.preimageHash}: ${result.error}`);
+      // Mark as failed (resets to pending) so it can be retried
+      store.markFailed(lockupData.preimageHash);
+    }
+  } catch (err) {
+    console.error(`${chainLabel}Auto-claim error:`, err);
+    store.markFailed(lockupData.preimageHash);
+  }
+}
+
 // ===== CITREA: CoinSwap (cBTC) =====
 ponder.on("CoinSwapCitrea:Lockup", async ({ event, context }) => {
   const id = createLockupId(context.chain.id, event.args.preimageHash);
 
-  const lockupData = {
+  const lockupData: LockupData = {
     id,
     preimageHash: event.args.preimageHash,
     amount: event.args.amount,
@@ -27,31 +89,7 @@ ponder.on("CoinSwapCitrea:Lockup", async ({ event, context }) => {
   };
 
   await context.db.insert(lockups).values(lockupData);
-
-  // Auto-claim only if preimage registered AND claimAddress = customerAddress
-  const store = getPreimageStore();
-  const registered = store.get(event.args.preimageHash);
-
-  if (registered) {
-    const shouldClaim =
-      registered.targetChainId === context.chain.id &&
-      registered.customerAddress?.toLowerCase() === event.args.claimAddress.toLowerCase();
-
-    if (shouldClaim) {
-      executeAutoClaim(registered.preimage, lockupData, context.chain.id)
-        .then((result) => {
-          if (result.success) {
-            console.log(`Auto-claim successful for ${event.args.preimageHash}: ${result.txHash}`);
-            store.delete(event.args.preimageHash);
-          } else if (result.error?.includes("no Ether locked") || result.error?.includes("no tokens locked")) {
-            console.log(`Auto-claim skipped for ${event.args.preimageHash}: already claimed`);
-          } else {
-            console.error(`Auto-claim failed for ${event.args.preimageHash}: ${result.error}`);
-          }
-        })
-        .catch((err) => console.error("Auto-claim error:", err));
-    }
-  }
+  await handleAutoClaimForLockup(lockupData);
 });
 
 ponder.on("CoinSwapCitrea:Claim", async ({ event, context }) => {
@@ -79,7 +117,7 @@ ponder.on("CoinSwapCitrea:Refund", async ({ event, context }) => {
 ponder.on("ERC20SwapCitrea:Lockup", async ({ event, context }) => {
   const id = createLockupId(context.chain.id, event.args.preimageHash);
 
-  const lockupData = {
+  const lockupData: LockupData = {
     id,
     preimageHash: event.args.preimageHash,
     amount: event.args.amount,
@@ -94,30 +132,7 @@ ponder.on("ERC20SwapCitrea:Lockup", async ({ event, context }) => {
   };
 
   await context.db.insert(lockups).values(lockupData);
-
-  const store = getPreimageStore();
-  const registered = store.get(event.args.preimageHash);
-
-  if (registered) {
-    const shouldClaim =
-      registered.targetChainId === context.chain.id &&
-      registered.customerAddress?.toLowerCase() === event.args.claimAddress.toLowerCase();
-
-    if (shouldClaim) {
-      executeAutoClaim(registered.preimage, lockupData, context.chain.id)
-        .then((result) => {
-          if (result.success) {
-            console.log(`Auto-claim successful for ${event.args.preimageHash}: ${result.txHash}`);
-            store.delete(event.args.preimageHash);
-          } else if (result.error?.includes("no tokens locked")) {
-            console.log(`Auto-claim skipped for ${event.args.preimageHash}: already claimed`);
-          } else {
-            console.error(`Auto-claim failed for ${event.args.preimageHash}: ${result.error}`);
-          }
-        })
-        .catch((err) => console.error("Auto-claim error:", err));
-    }
-  }
+  await handleAutoClaimForLockup(lockupData);
 });
 
 ponder.on("ERC20SwapCitrea:Claim", async ({ event, context }) => {
@@ -145,7 +160,7 @@ ponder.on("ERC20SwapCitrea:Refund", async ({ event, context }) => {
 ponder.on("ERC20SwapPolygon:Lockup", async ({ event, context }) => {
   const id = createLockupId(context.chain.id, event.args.preimageHash);
 
-  const lockupData = {
+  const lockupData: LockupData = {
     id,
     preimageHash: event.args.preimageHash,
     amount: event.args.amount,
@@ -154,36 +169,13 @@ ponder.on("ERC20SwapPolygon:Lockup", async ({ event, context }) => {
     timelock: event.args.timelock,
     tokenAddress: event.args.tokenAddress,
     swapType: SwapType.ERC20,
-    chainId: context.chain.id, // 137
+    chainId: context.chain.id,
     claimed: false,
     refunded: false,
   };
 
   await context.db.insert(lockups).values(lockupData);
-
-  const store = getPreimageStore();
-  const registered = store.get(event.args.preimageHash);
-
-  if (registered) {
-    const shouldClaim =
-      registered.targetChainId === context.chain.id &&
-      registered.customerAddress?.toLowerCase() === event.args.claimAddress.toLowerCase();
-
-    if (shouldClaim) {
-      executeAutoClaim(registered.preimage, lockupData, context.chain.id)
-        .then((result) => {
-          if (result.success) {
-            console.log(`[Polygon] Auto-claim successful for ${event.args.preimageHash}: ${result.txHash}`);
-            store.delete(event.args.preimageHash);
-          } else if (result.error?.includes("no tokens locked")) {
-            console.log(`[Polygon] Auto-claim skipped for ${event.args.preimageHash}: already claimed`);
-          } else {
-            console.error(`[Polygon] Auto-claim failed for ${event.args.preimageHash}: ${result.error}`);
-          }
-        })
-        .catch((err) => console.error("[Polygon] Auto-claim error:", err));
-    }
-  }
+  await handleAutoClaimForLockup(lockupData, "[Polygon] ");
 });
 
 ponder.on("ERC20SwapPolygon:Claim", async ({ event, context }) => {
@@ -211,7 +203,7 @@ ponder.on("ERC20SwapPolygon:Refund", async ({ event, context }) => {
 ponder.on("ERC20SwapEthereum:Lockup", async ({ event, context }) => {
   const id = createLockupId(context.chain.id, event.args.preimageHash);
 
-  const lockupData = {
+  const lockupData: LockupData = {
     id,
     preimageHash: event.args.preimageHash,
     amount: event.args.amount,
@@ -220,36 +212,13 @@ ponder.on("ERC20SwapEthereum:Lockup", async ({ event, context }) => {
     timelock: event.args.timelock,
     tokenAddress: event.args.tokenAddress,
     swapType: SwapType.ERC20,
-    chainId: context.chain.id, // 1
+    chainId: context.chain.id,
     claimed: false,
     refunded: false,
   };
 
   await context.db.insert(lockups).values(lockupData);
-
-  const store = getPreimageStore();
-  const registered = store.get(event.args.preimageHash);
-
-  if (registered) {
-    const shouldClaim =
-      registered.targetChainId === context.chain.id &&
-      registered.customerAddress?.toLowerCase() === event.args.claimAddress.toLowerCase();
-
-    if (shouldClaim) {
-      executeAutoClaim(registered.preimage, lockupData, context.chain.id)
-        .then((result) => {
-          if (result.success) {
-            console.log(`[Ethereum] Auto-claim successful for ${event.args.preimageHash}: ${result.txHash}`);
-            store.delete(event.args.preimageHash);
-          } else if (result.error?.includes("no tokens locked")) {
-            console.log(`[Ethereum] Auto-claim skipped for ${event.args.preimageHash}: already claimed`);
-          } else {
-            console.error(`[Ethereum] Auto-claim failed for ${event.args.preimageHash}: ${result.error}`);
-          }
-        })
-        .catch((err) => console.error("[Ethereum] Auto-claim error:", err));
-    }
-  }
+  await handleAutoClaimForLockup(lockupData, "[Ethereum] ");
 });
 
 ponder.on("ERC20SwapEthereum:Claim", async ({ event, context }) => {

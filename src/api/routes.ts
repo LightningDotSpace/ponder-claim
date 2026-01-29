@@ -6,23 +6,26 @@ import { ethers, formatEther } from "ethers";
 import { CoinSwapABI } from "../../abis/CoinSwap";
 import { ERC20SwapABI } from "../../abis/ERC20Swap";
 import { getSigner, prefix0x } from "../utils/evm";
-import { SwapType } from "../utils/constants";
+import { SwapType, CHAIN_IDS, isValidAddress, isValidPreimage, isValidPreimageHash } from "../utils/constants";
 import { getPreimageStore } from "../utils/preimageStore";
 import { transactionQueue } from "../utils/transactionQueue";
 
 const CONTRACT_ADDRESSES: Record<number, { coinSwap?: string; erc20Swap: string }> = {
-  4114: { // Citrea Mainnet
+  [CHAIN_IDS.CITREA_MAINNET]: { // Citrea Mainnet
     coinSwap: "0xFD92F846fe6E7d08d28D6A88676BB875E5D906ab",
     erc20Swap: "0x7397F25F230f7d5A83c18e1B68b32511bf35F860",
   },
-  5115: { // Citrea Testnet
+  [CHAIN_IDS.CITREA_TESTNET]: { // Citrea Testnet
     coinSwap: "0xd02731fD8c5FDD53B613A699234FAd5EE8851B65",
     erc20Swap: "0xf2e019a371e5Fd32dB2fC564Ad9eAE9E433133cc",
   },
-  137: { // Polygon
+  [CHAIN_IDS.POLYGON_MAINNET]: { // Polygon Mainnet
     erc20Swap: "0x2E21F58Da58c391F110467c7484EdfA849C1CB9B",
   },
-  1: { // Ethereum
+  [CHAIN_IDS.POLYGON_TESTNET_AMOY]: { // Polygon Testnet (Amoy)
+    erc20Swap: "0x2E21F58Da58c391F110467c7484EdfA849C1CB9B",
+  },
+  [CHAIN_IDS.ETHEREUM_MAINNET]: { // Ethereum Mainnet
     erc20Swap: "0x2E21F58Da58c391F110467c7484EdfA849C1CB9B",
   },
 };
@@ -66,6 +69,11 @@ routes.get("/check-preimagehash", async (c: Context) => {
 
   if (!preimageHash) {
     return c.json({ error: "Preimage hash is required" }, 400);
+  }
+
+  // Validate preimageHash format
+  if (!isValidPreimageHash(preimageHash)) {
+    return c.json({ error: "Invalid preimageHash format. Must be 32 bytes (64 hex characters), optionally with 0x prefix" }, 400);
   }
 
   const normalizedHash = prefix0x(preimageHash);
@@ -117,9 +125,24 @@ routes.post("/register-preimage", async (c: Context) => {
     return c.json({ error: "preimageHash and preimage required" }, 400);
   }
 
+  // Validate preimageHash format (32 bytes = 64 hex chars)
+  if (!isValidPreimageHash(preimageHash)) {
+    return c.json({ error: "Invalid preimageHash format. Must be 32 bytes (64 hex characters), optionally with 0x prefix" }, 400);
+  }
+
+  // Validate preimage format (32 bytes = 64 hex chars)
+  if (!isValidPreimage(preimage)) {
+    return c.json({ error: "Invalid preimage format. Must be 32 bytes (64 hex characters), optionally with 0x prefix" }, 400);
+  }
+
   // For outflow swaps: customerAddress and targetChainId required
   if (targetChainId && !customerAddress) {
     return c.json({ error: "customerAddress required when targetChainId is specified" }, 400);
+  }
+
+  // Validate customerAddress format if provided (0x + 40 hex chars)
+  if (customerAddress && !isValidAddress(customerAddress)) {
+    return c.json({ error: "Invalid customerAddress format. Must be 0x followed by 40 hex characters" }, 400);
   }
 
   // Validate targetChainId if provided
@@ -151,6 +174,16 @@ routes.post("/help-me-claim", async (c: Context) => {
 
   if (!preimageHash) {
     return c.json({ error: "preimageHash is required" }, 400);
+  }
+
+  // Validate preimageHash format
+  if (!isValidPreimageHash(preimageHash)) {
+    return c.json({ error: "Invalid preimageHash format. Must be 32 bytes (64 hex characters), optionally with 0x prefix" }, 400);
+  }
+
+  // Validate preimage format if provided
+  if (preimage && !isValidPreimage(preimage)) {
+    return c.json({ error: "Invalid preimage format. Must be 32 bytes (64 hex characters), optionally with 0x prefix" }, 400);
   }
 
   const normalizedHash = prefix0x(preimageHash);
@@ -204,7 +237,7 @@ routes.post("/help-me-claim", async (c: Context) => {
   }
 
   try {
-    const result = await transactionQueue.enqueue(async () => {
+    const result = await transactionQueue.enqueue(chainId, async () => {
       const signer = getSigner(chainId);
 
       if (swapType === SwapType.ERC20 || tokenAddress) {

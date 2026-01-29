@@ -6,11 +6,20 @@ import { citreaTransport } from "./citrea-transport-fix";
 
 const targetChain = (process.env.TARGET_CHAIN as "testnet" | "mainnet") || "mainnet";
 
+// Chain IDs - keep in sync with src/utils/constants.ts
+const CHAIN_IDS = {
+  CITREA_MAINNET: 4114,
+  CITREA_TESTNET: 5115,
+  POLYGON_MAINNET: 137,
+  POLYGON_TESTNET_AMOY: 80002, // Amoy testnet (Mumbai deprecated)
+  ETHEREUM_MAINNET: 1,
+} as const;
+
 const config = {
   testnet: {
-    citrea: { chainId: 5115, rpc: process.env.RPC_CITREA_TESTNET! },
-    polygon: { chainId: 137, rpc: process.env.RPC_POLYGON! },
-    ethereum: { chainId: 1, rpc: process.env.RPC_ETHEREUM! },
+    citrea: { chainId: CHAIN_IDS.CITREA_TESTNET, rpc: process.env.RPC_CITREA_TESTNET! },
+    polygon: { chainId: CHAIN_IDS.POLYGON_TESTNET_AMOY, rpc: process.env.RPC_POLYGON_TESTNET! },
+    ethereum: { chainId: CHAIN_IDS.ETHEREUM_MAINNET, rpc: process.env.RPC_ETHEREUM! },
     contracts: {
       citreaERC20: "0xf2e019a371e5Fd32dB2fC564Ad9eAE9E433133cc",
       citreaCoin: "0xd02731fD8c5FDD53B613A699234FAd5EE8851B65",
@@ -20,9 +29,9 @@ const config = {
     startBlocks: { citrea: 18332348, polygon: 50000000, ethereum: 19000000 },
   },
   mainnet: {
-    citrea: { chainId: 4114, rpc: process.env.RPC_CITREA_MAINNET! },
-    polygon: { chainId: 137, rpc: process.env.RPC_POLYGON! },
-    ethereum: { chainId: 1, rpc: process.env.RPC_ETHEREUM! },
+    citrea: { chainId: CHAIN_IDS.CITREA_MAINNET, rpc: process.env.RPC_CITREA_MAINNET! },
+    polygon: { chainId: CHAIN_IDS.POLYGON_MAINNET, rpc: process.env.RPC_POLYGON! },
+    ethereum: { chainId: CHAIN_IDS.ETHEREUM_MAINNET, rpc: process.env.RPC_ETHEREUM! },
     contracts: {
       citreaERC20: "0x7397F25F230f7d5A83c18e1B68b32511bf35F860",
       citreaCoin: "0xFD92F846fe6E7d08d28D6A88676BB875E5D906ab",

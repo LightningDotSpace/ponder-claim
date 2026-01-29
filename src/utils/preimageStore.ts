@@ -3,12 +3,15 @@ import path from 'path';
 
 const DB_PATH = process.env.PREIMAGE_DB_PATH || path.join(process.cwd(), 'preimages.sqlite');
 
+export type PreimageStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+
 interface PreimageRecord {
   preimageHash: string;
   preimage: string;
   swapId: string | null;
   customerAddress: string | null;
   targetChainId: number | null;
+  status: PreimageStatus;
   createdAt: number;
 }
 
@@ -31,6 +34,7 @@ class PreimageStore {
         swap_id TEXT,
         customer_address TEXT,
         target_chain_id INTEGER,
+        status TEXT NOT NULL DEFAULT 'pending',
         created_at INTEGER NOT NULL
       )
     `);
@@ -50,6 +54,10 @@ class PreimageStore {
     if (!columnNames.includes('target_chain_id')) {
       this.db.exec('ALTER TABLE registered_preimages ADD COLUMN target_chain_id INTEGER');
     }
+
+    if (!columnNames.includes('status')) {
+      this.db.exec("ALTER TABLE registered_preimages ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'");
+    }
   }
 
   register(
@@ -60,13 +68,14 @@ class PreimageStore {
     targetChainId?: number
   ): void {
     const stmt = this.db.prepare(`
-      INSERT INTO registered_preimages (preimage_hash, preimage, swap_id, customer_address, target_chain_id, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO registered_preimages (preimage_hash, preimage, swap_id, customer_address, target_chain_id, status, created_at)
+      VALUES (?, ?, ?, ?, ?, 'pending', ?)
       ON CONFLICT(preimage_hash) DO UPDATE SET
         preimage = excluded.preimage,
         swap_id = excluded.swap_id,
         customer_address = excluded.customer_address,
-        target_chain_id = excluded.target_chain_id
+        target_chain_id = excluded.target_chain_id,
+        status = 'pending'
     `);
     stmt.run(
       preimageHash,
@@ -86,11 +95,51 @@ class PreimageStore {
         swap_id as swapId,
         customer_address as customerAddress,
         target_chain_id as targetChainId,
+        status,
         created_at as createdAt
       FROM registered_preimages
       WHERE preimage_hash = ?
     `);
     return stmt.get(preimageHash) as PreimageRecord | undefined;
+  }
+
+  /**
+   * Atomically mark preimage as 'in_progress' if currently 'pending'.
+   * Returns true if successful (was pending), false if already in_progress/completed/failed.
+   * This prevents race conditions where multiple lockup events try to claim the same preimage.
+   */
+  markInProgress(preimageHash: string): boolean {
+    const stmt = this.db.prepare(`
+      UPDATE registered_preimages
+      SET status = 'in_progress'
+      WHERE preimage_hash = ? AND status = 'pending'
+    `);
+    const result = stmt.run(preimageHash);
+    return result.changes > 0;
+  }
+
+  /**
+   * Mark preimage as completed (successfully claimed).
+   */
+  markCompleted(preimageHash: string): void {
+    const stmt = this.db.prepare(`
+      UPDATE registered_preimages
+      SET status = 'completed'
+      WHERE preimage_hash = ?
+    `);
+    stmt.run(preimageHash);
+  }
+
+  /**
+   * Mark preimage as failed (claim failed, can be retried).
+   */
+  markFailed(preimageHash: string): void {
+    const stmt = this.db.prepare(`
+      UPDATE registered_preimages
+      SET status = 'pending'
+      WHERE preimage_hash = ?
+    `);
+    stmt.run(preimageHash);
   }
 
   delete(preimageHash: string): void {
