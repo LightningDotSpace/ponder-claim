@@ -1,29 +1,19 @@
 import { ethers } from "ethers";
-import { CHAIN_IDS } from "./constants";
+import { CHAIN_RPC_URLS } from "../../constants";
 
 /**
  * Chain-specific RPC configuration.
  * NOTE: The same SIGNER_PRIVATE_KEY is used for all chains.
  * This is intentional - the claim service uses a single wallet across all supported networks.
  */
-const CHAIN_CONFIGS: Record<number, { name: string; rpcEnv: string }> = {
-  [CHAIN_IDS.CITREA_MAINNET]: { name: "citrea-mainnet", rpcEnv: "RPC_CITREA_MAINNET" },
-  [CHAIN_IDS.CITREA_TESTNET]: { name: "citrea-testnet", rpcEnv: "RPC_CITREA_TESTNET" },
-  [CHAIN_IDS.POLYGON_MAINNET]: { name: "polygon-mainnet", rpcEnv: "RPC_POLYGON" },
-  [CHAIN_IDS.POLYGON_TESTNET_AMOY]: { name: "polygon-testnet-amoy", rpcEnv: "RPC_POLYGON_TESTNET" },
-  [CHAIN_IDS.ETHEREUM_MAINNET]: { name: "ethereum-mainnet", rpcEnv: "RPC_ETHEREUM" },
-};
 
 const providers = new Map<number, ethers.JsonRpcProvider>();
 const signers = new Map<number, ethers.Wallet>();
 
 export function getProvider(chainId: number): ethers.JsonRpcProvider {
   if (!providers.has(chainId)) {
-    const config = CHAIN_CONFIGS[chainId];
-    if (!config) throw new Error(`Unsupported chainId: ${chainId}`);
-
-    const rpcUrl = process.env[config.rpcEnv];
-    if (!rpcUrl) throw new Error(`Missing RPC URL for ${config.name}`);
+    const rpcUrl = CHAIN_RPC_URLS[chainId];
+    if (!rpcUrl) throw new Error(`Missing RPC URL for chainId: ${chainId}`);
 
     providers.set(chainId, new ethers.JsonRpcProvider(rpcUrl));
   }

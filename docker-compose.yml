@@ -8,6 +8,9 @@ services:
     environment:
       - NODE_ENV=${NODE_ENV:-production}
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    volumes:
+      - ponder_data:/app/.ponder
+      - preimage_data:/app/preimages.sqlite
     depends_on:
       - postgres
     restart: unless-stopped
@@ -29,3 +32,5 @@ services:
 
 volumes:
   postgres_data:
+  preimage_data:
+  ponder_data:

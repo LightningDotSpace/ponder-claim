@@ -6,29 +6,11 @@ import { ethers, formatEther } from "ethers";
 import { CoinSwapABI } from "../../abis/CoinSwap";
 import { ERC20SwapABI } from "../../abis/ERC20Swap";
 import { getSigner, prefix0x } from "../utils/evm";
-import { SwapType, CHAIN_IDS, isValidAddress, isValidPreimage, isValidPreimageHash } from "../utils/constants";
+import { SwapType } from "../../constants";
+import { isValidAddress, isValidPreimage, isValidPreimageHash } from "../utils/validations";
 import { getPreimageStore } from "../utils/preimageStore";
 import { transactionQueue } from "../utils/transactionQueue";
-
-const CONTRACT_ADDRESSES: Record<number, { coinSwap?: string; erc20Swap: string }> = {
-  [CHAIN_IDS.CITREA_MAINNET]: { // Citrea Mainnet
-    coinSwap: "0xFD92F846fe6E7d08d28D6A88676BB875E5D906ab",
-    erc20Swap: "0x7397F25F230f7d5A83c18e1B68b32511bf35F860",
-  },
-  [CHAIN_IDS.CITREA_TESTNET]: { // Citrea Testnet
-    coinSwap: "0xd02731fD8c5FDD53B613A699234FAd5EE8851B65",
-    erc20Swap: "0xf2e019a371e5Fd32dB2fC564Ad9eAE9E433133cc",
-  },
-  [CHAIN_IDS.POLYGON_MAINNET]: { // Polygon Mainnet
-    erc20Swap: "0x2E21F58Da58c391F110467c7484EdfA849C1CB9B",
-  },
-  [CHAIN_IDS.POLYGON_TESTNET_AMOY]: { // Polygon Testnet (Amoy)
-    erc20Swap: "0x2E21F58Da58c391F110467c7484EdfA849C1CB9B",
-  },
-  [CHAIN_IDS.ETHEREUM_MAINNET]: { // Ethereum Mainnet
-    erc20Swap: "0x2E21F58Da58c391F110467c7484EdfA849C1CB9B",
-  },
-};
+import { CONTRACT_ADDRESSES } from "../../constants";
 
 // Helper to create composite lockup ID
 const createLockupId = (chainId: number, preimageHash: string) =>

@@ -1,17 +1,3 @@
-export enum SwapType {
-  NATIVE = "native",
-  ERC20 = "erc20",
-}
-
-// Chain IDs
-export const CHAIN_IDS = {
-  CITREA_MAINNET: 4114,
-  CITREA_TESTNET: 5115,
-  POLYGON_MAINNET: 137,
-  POLYGON_TESTNET_AMOY: 80002,
-  ETHEREUM_MAINNET: 1,
-} as const;
-
 /**
  * Validates an Ethereum address format.
  * Must be 0x followed by exactly 40 hex characters.

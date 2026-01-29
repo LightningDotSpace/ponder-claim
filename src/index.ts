@@ -1,6 +1,6 @@
 import { ponder } from "ponder:registry";
 import { lockups } from "../ponder.schema";
-import { SwapType } from "./utils/constants";
+import { SwapType } from "../constants";
 import { executeAutoClaim } from "./utils/autoClaim";
 import { getPreimageStore } from "./utils/preimageStore";
 
@@ -26,10 +26,7 @@ interface LockupData {
  * Handles auto-claim logic for lockup events.
  * CRITICAL: Marks preimage as 'in_progress' BEFORE starting the claim to prevent race conditions.
  */
-async function handleAutoClaimForLockup(
-  lockupData: LockupData,
-  chainLabel: string = ""
-): Promise<void> {
+async function handleAutoClaimForLockup(lockupData: LockupData): Promise<void> {
   const store = getPreimageStore();
   const registered = store.get(lockupData.preimageHash);
 
@@ -44,12 +41,12 @@ async function handleAutoClaimForLockup(
     const addressMatches = registered.customerAddress?.toLowerCase() === lockupData.claimAddress.toLowerCase();
 
     if (!chainMatches) {
-      console.log(`${chainLabel}Auto-claim skipped for ${lockupData.preimageHash}: chain mismatch (expected: ${registered.targetChainId}, got: ${lockupData.chainId})`);
+      console.log(`[${lockupData.chainId}] Auto-claim skipped for ${lockupData.preimageHash}: chain mismatch (expected: ${registered.targetChainId}, got: ${lockupData.chainId})`);
       return;
     }
 
     if (!addressMatches) {
-      console.log(`${chainLabel}Auto-claim skipped for ${lockupData.preimageHash}: address mismatch (expected: ${registered.customerAddress}, got: ${lockupData.claimAddress})`);
+      console.log(`[${lockupData.chainId}] Auto-claim skipped for ${lockupData.preimageHash}: address mismatch (expected: ${registered.customerAddress}, got: ${lockupData.claimAddress})`);
       return;
     }
   }
@@ -60,7 +57,7 @@ async function handleAutoClaimForLockup(
   // try to claim the same preimage simultaneously.
   const acquired = store.markInProgress(lockupData.preimageHash);
   if (!acquired) {
-    console.log(`${chainLabel}Auto-claim skipped for ${lockupData.preimageHash}: already in progress or completed`);
+    console.log(`[${lockupData.chainId}] Auto-claim skipped for ${lockupData.preimageHash}: already in progress or completed`);
     return;
   }
 
@@ -68,18 +65,18 @@ async function handleAutoClaimForLockup(
     const result = await executeAutoClaim(registered.preimage, lockupData, lockupData.chainId);
 
     if (result.success) {
-      console.log(`${chainLabel}Auto-claim successful for ${lockupData.preimageHash}: ${result.txHash}`);
+      console.log(`[${lockupData.chainId}] Auto-claim successful for ${lockupData.preimageHash}: ${result.txHash}`);
       store.markCompleted(lockupData.preimageHash);
     } else if (result.error?.includes("no Ether locked") || result.error?.includes("no tokens locked")) {
-      console.log(`${chainLabel}Auto-claim skipped for ${lockupData.preimageHash}: already claimed`);
+      console.log(`[${lockupData.chainId}] Auto-claim skipped for ${lockupData.preimageHash}: already claimed`);
       store.markCompleted(lockupData.preimageHash);
     } else {
-      console.error(`${chainLabel}Auto-claim failed for ${lockupData.preimageHash}: ${result.error}`);
+      console.error(`[${lockupData.chainId}] Auto-claim failed for ${lockupData.preimageHash}: ${result.error}`);
       // Mark as failed (resets to pending) so it can be retried
       store.markFailed(lockupData.preimageHash);
     }
   } catch (err) {
-    console.error(`${chainLabel}Auto-claim error:`, err);
+    console.error(`[${lockupData.chainId}] Auto-claim error:`, err);
     store.markFailed(lockupData.preimageHash);
   }
 }
@@ -103,7 +100,9 @@ ponder.on("CoinSwapCitrea:Lockup", async ({ event, context }) => {
   };
 
   await context.db.insert(lockups).values(lockupData);
-  await handleAutoClaimForLockup(lockupData);
+  handleAutoClaimForLockup(lockupData).catch((err) => {
+    console.error("Uncaught error in handleAutoClaimForLockup:", err);
+  });
 });
 
 ponder.on("CoinSwapCitrea:Claim", async ({ event, context }) => {
@@ -146,7 +145,9 @@ ponder.on("ERC20SwapCitrea:Lockup", async ({ event, context }) => {
   };
 
   await context.db.insert(lockups).values(lockupData);
-  await handleAutoClaimForLockup(lockupData);
+  handleAutoClaimForLockup(lockupData).catch((err) => {
+    console.error("Uncaught error in handleAutoClaimForLockup:", err);
+  });
 });
 
 ponder.on("ERC20SwapCitrea:Claim", async ({ event, context }) => {
@@ -189,7 +190,9 @@ ponder.on("ERC20SwapPolygon:Lockup", async ({ event, context }) => {
   };
 
   await context.db.insert(lockups).values(lockupData);
-  await handleAutoClaimForLockup(lockupData, "[Polygon] ");
+  handleAutoClaimForLockup(lockupData).catch((err) => {
+    console.error("Uncaught error in handleAutoClaimForLockup:", err);
+  });
 });
 
 ponder.on("ERC20SwapPolygon:Claim", async ({ event, context }) => {
@@ -232,7 +235,9 @@ ponder.on("ERC20SwapEthereum:Lockup", async ({ event, context }) => {
   };
 
   await context.db.insert(lockups).values(lockupData);
-  await handleAutoClaimForLockup(lockupData, "[Ethereum] ");
+  handleAutoClaimForLockup(lockupData).catch((err) => {
+    console.error("Uncaught error in handleAutoClaimForLockup:", err);
+  });
 });
 
 ponder.on("ERC20SwapEthereum:Claim", async ({ event, context }) => {
