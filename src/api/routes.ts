@@ -1,7 +1,7 @@
 import { db } from "ponder:api";
 import { lockups } from "ponder:schema";
 import { Context, Hono } from "hono";
-import { and, eq } from "ponder";
+import { eq } from "ponder";
 import { ethers, formatEther } from "ethers";
 import { CoinSwapABI } from "../../abis/CoinSwap";
 import { ERC20SwapABI } from "../../abis/ERC20Swap";
@@ -22,6 +22,33 @@ const contractAddresses = {
 };
 
 const routes = new Hono();
+
+/**
+ * Wait for a lockup to be marked as claimed in the database.
+ * Used to handle race conditions where Auto-Claim finished but Claim Event not yet indexed.
+ * Default is: 5x2 seconds
+ */
+async function waitForClaimedLockup(
+  preimageHash: string,
+  maxAttempts = 5,
+  delayMs = 2000
+): Promise<{ txHash: string; swapType: string | null } | null> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+
+    const lockup = await db.select().from(lockups)
+      .where(eq(lockups.preimageHash, preimageHash))
+      .limit(1);
+
+    if (lockup[0]?.claimed && lockup[0]?.claimTxHash) {
+      return {
+        txHash: lockup[0].claimTxHash,
+        swapType: lockup[0].swapType,
+      };
+    }
+  }
+  return null;
+}
 
 routes.get("/check-preimagehash", async (c: Context) => {
   const preimageHash = c.req.query("preimageHash");
@@ -69,11 +96,7 @@ routes.post("/help-me-claim", async (c: Context) => {
   const { preimageHash, preimage } = await c.req.json();
 
   const lockup = await db.select().from(lockups).where(
-    and(
-      eq(lockups.preimageHash, preimageHash),
-      eq(lockups.claimed, false),
-      eq(lockups.refunded, false)
-    )
+    eq(lockups.preimageHash, preimageHash)
   ).limit(1);
 
   if (!lockup.length) {
@@ -81,6 +104,20 @@ routes.post("/help-me-claim", async (c: Context) => {
   }
 
   const lockupData = lockup[0]!;
+
+  // Already claimed - return existing txHash
+  if (lockupData.claimed && lockupData.claimTxHash) {
+    return c.json({
+      success: true,
+      txHash: lockupData.claimTxHash,
+      swapType: lockupData.swapType,
+    });
+  }
+
+  // Refunded - cannot claim
+  if (lockupData.refunded) {
+    return c.json({ error: "Swap was refunded" }, 409);
+  }
   const amount = lockupData.amount;
   const claimAddress = lockupData.claimAddress;
   const refundAddress = lockupData.refundAddress;
@@ -135,10 +172,24 @@ routes.post("/help-me-claim", async (c: Context) => {
       swapType: txHash.swapType,
     });
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    // Check if already claimed (race condition: Auto-Claim finished but Claim Event not yet processed)
+    if (errorMessage.includes("no tokens locked") || errorMessage.includes("no Ether locked")) {
+      const claimedLockup = await waitForClaimedLockup(preimageHash);
+      if (claimedLockup) {
+        return c.json({
+          success: true,
+          txHash: claimedLockup.txHash,
+          swapType: claimedLockup.swapType,
+        });
+      }
+    }
+
     console.error("Claim failed:", error);
     return c.json({
       error: "Claim transaction failed",
-      details: error instanceof Error ? error.message : String(error)
+      details: errorMessage
     }, 500);
   }
 });

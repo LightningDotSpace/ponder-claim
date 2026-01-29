@@ -28,6 +28,8 @@ ponder.on("CoinSwapAbi:Lockup", async ({ event, context }) => {
       .then((result) => {
         if (result.success) {
           console.log(`Auto-claim successful for ${event.args.preimageHash}: ${result.txHash}`);
+        } else if (result.error?.includes("no Ether locked") || result.error?.includes("no tokens locked")) {
+          console.log(`Auto-claim skipped for ${event.args.preimageHash}: already claimed`);
         } else {
           console.error(`Auto-claim failed for ${event.args.preimageHash}: ${result.error}`);
         }
@@ -79,6 +81,8 @@ ponder.on("ERC20SwapCitrea:Lockup", async ({ event, context }) => {
       .then((result) => {
         if (result.success) {
           console.log(`Auto-claim successful for ${event.args.preimageHash}: ${result.txHash}`);
+        } else if (result.error?.includes("no Ether locked") || result.error?.includes("no tokens locked")) {
+          console.log(`Auto-claim skipped for ${event.args.preimageHash}: already claimed`);
         } else {
           console.error(`Auto-claim failed for ${event.args.preimageHash}: ${result.error}`);
         }
