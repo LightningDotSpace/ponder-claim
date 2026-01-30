@@ -1,14 +1,39 @@
 import { ethers } from "ethers";
+import { CHAIN_RPC_URLS } from "../../constants";
 
-const provider = new ethers.JsonRpcProvider(process.env.RPC_PROVIDER_URL!);
+/**
+ * Chain-specific RPC configuration.
+ * NOTE: The same SIGNER_PRIVATE_KEY is used for all chains.
+ * This is intentional - the claim service uses a single wallet across all supported networks.
+ */
 
-let signer: ethers.Wallet | null = null;
+const providers = new Map<number, ethers.JsonRpcProvider>();
+const signers = new Map<number, ethers.Wallet>();
 
-export function getSigner(): ethers.Wallet {
-  if (!signer) {
-    signer = new ethers.Wallet(process.env.SIGNER_PRIVATE_KEY!, provider);
+export function getProvider(chainId: number): ethers.JsonRpcProvider {
+  if (!providers.has(chainId)) {
+    const rpcUrl = CHAIN_RPC_URLS[chainId];
+    if (!rpcUrl) throw new Error(`Missing RPC URL for chainId: ${chainId}`);
+
+    providers.set(chainId, new ethers.JsonRpcProvider(rpcUrl));
   }
-  return signer;
+  return providers.get(chainId)!;
+}
+
+/**
+ * Get a signer for the specified chain.
+ * NOTE: Uses the same SIGNER_PRIVATE_KEY for all chains.
+ * This means the claim service wallet address is identical across all networks.
+ */
+export function getSigner(chainId: number): ethers.Wallet {
+  if (!signers.has(chainId)) {
+    const privateKey = process.env.SIGNER_PRIVATE_KEY;
+    if (!privateKey) throw new Error("Missing SIGNER_PRIVATE_KEY");
+
+    const provider = getProvider(chainId);
+    signers.set(chainId, new ethers.Wallet(privateKey, provider));
+  }
+  return signers.get(chainId)!;
 }
 
 const weiFactor = BigInt(10 ** 10);

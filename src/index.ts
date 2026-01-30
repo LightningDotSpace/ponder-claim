@@ -1,11 +1,92 @@
 import { ponder } from "ponder:registry";
 import { lockups } from "../ponder.schema";
-import { SwapType } from "./utils/constants";
+import { SwapType } from "../constants";
 import { executeAutoClaim } from "./utils/autoClaim";
 import { getPreimageStore } from "./utils/preimageStore";
 
-ponder.on("CoinSwapAbi:Lockup", async ({ event, context }) => {
-  const lockupData = {
+// Helper for Composite ID
+const createLockupId = (chainId: number, preimageHash: string) =>
+  `${chainId}:${preimageHash}`;
+
+interface LockupData {
+  id: string;
+  preimageHash: string;
+  amount: bigint;
+  claimAddress: string;
+  refundAddress: string;
+  timelock: bigint;
+  swapType: string;
+  chainId: number;
+  tokenAddress: string | null;
+  claimed: boolean;
+  refunded: boolean;
+}
+
+/**
+ * Handles auto-claim logic for lockup events.
+ * CRITICAL: Marks preimage as 'in_progress' BEFORE starting the claim to prevent race conditions.
+ */
+async function handleAutoClaimForLockup(lockupData: LockupData): Promise<void> {
+  const store = getPreimageStore();
+  const registered = store.get(lockupData.preimageHash);
+
+  if (!registered) return;
+
+  // Check if this is an outflow swap (targetChainId is NOT NULL in DB)
+  const isOutflowSwap = registered.targetChainId !== null;
+
+  if (isOutflowSwap) {
+    // Outflow swap: Validate chain and address match
+    const chainMatches = registered.targetChainId === lockupData.chainId;
+    const addressMatches = registered.customerAddress?.toLowerCase() === lockupData.claimAddress.toLowerCase();
+
+    if (!chainMatches) {
+      console.log(`[${lockupData.chainId}] Auto-claim skipped for ${lockupData.preimageHash}: chain mismatch (expected: ${registered.targetChainId}, got: ${lockupData.chainId})`);
+      return;
+    }
+
+    if (!addressMatches) {
+      console.log(`[${lockupData.chainId}] Auto-claim skipped for ${lockupData.preimageHash}: address mismatch (expected: ${registered.customerAddress}, got: ${lockupData.claimAddress})`);
+      return;
+    }
+  }
+  // Inflow swaps (targetChainId === null): Always proceed with claim (legacy behavior)
+
+  // CRITICAL: Atomically mark as 'in_progress' BEFORE starting the claim.
+  // This prevents race conditions where multiple lockup events (or duplicate events)
+  // try to claim the same preimage simultaneously.
+  const acquired = store.markInProgress(lockupData.preimageHash);
+  if (!acquired) {
+    console.log(`[${lockupData.chainId}] Auto-claim skipped for ${lockupData.preimageHash}: already in progress or completed`);
+    return;
+  }
+
+  try {
+    const result = await executeAutoClaim(registered.preimage, lockupData, lockupData.chainId);
+
+    if (result.success) {
+      console.log(`[${lockupData.chainId}] Auto-claim successful for ${lockupData.preimageHash}: ${result.txHash}`);
+      store.markCompleted(lockupData.preimageHash);
+    } else if (result.error?.includes("no Ether locked") || result.error?.includes("no tokens locked")) {
+      console.log(`[${lockupData.chainId}] Auto-claim skipped for ${lockupData.preimageHash}: already claimed`);
+      store.markCompleted(lockupData.preimageHash);
+    } else {
+      console.error(`[${lockupData.chainId}] Auto-claim failed for ${lockupData.preimageHash}: ${result.error}`);
+      // Mark as failed (resets to pending) so it can be retried
+      store.markFailed(lockupData.preimageHash);
+    }
+  } catch (err) {
+    console.error(`[${lockupData.chainId}] Auto-claim error:`, err);
+    store.markFailed(lockupData.preimageHash);
+  }
+}
+
+// ===== CITREA: CoinSwap (cBTC) =====
+ponder.on("CoinSwapCitrea:Lockup", async ({ event, context }) => {
+  const id = createLockupId(context.chain.id, event.args.preimageHash);
+
+  const lockupData: LockupData = {
+    id,
     preimageHash: event.args.preimageHash,
     amount: event.args.amount,
     claimAddress: event.args.claimAddress,
@@ -19,28 +100,15 @@ ponder.on("CoinSwapAbi:Lockup", async ({ event, context }) => {
   };
 
   await context.db.insert(lockups).values(lockupData);
-
-  const store = getPreimageStore();
-  const registered = store.get(event.args.preimageHash);
-
-  if (registered) {
-    executeAutoClaim(registered.preimage, lockupData, context.chain.id)
-      .then((result) => {
-        if (result.success) {
-          console.log(`Auto-claim successful for ${event.args.preimageHash}: ${result.txHash}`);
-        } else if (result.error?.includes("no Ether locked") || result.error?.includes("no tokens locked")) {
-          console.log(`Auto-claim skipped for ${event.args.preimageHash}: already claimed`);
-        } else {
-          console.error(`Auto-claim failed for ${event.args.preimageHash}: ${result.error}`);
-        }
-      })
-      .catch((err) => console.error("Auto-claim error:", err));
-  }
+  handleAutoClaimForLockup(lockupData).catch((err) => {
+    console.error("Uncaught error in handleAutoClaimForLockup:", err);
+  });
 });
 
-ponder.on("CoinSwapAbi:Claim", async ({ event, context }) => {
+ponder.on("CoinSwapCitrea:Claim", async ({ event, context }) => {
+  const id = createLockupId(context.chain.id, event.args.preimageHash);
   await context.db
-    .update(lockups, { preimageHash: event.args.preimageHash })
+    .update(lockups, { id })
     .set({
       claimed: true,
       claimTxHash: event.transaction.hash,
@@ -48,17 +116,22 @@ ponder.on("CoinSwapAbi:Claim", async ({ event, context }) => {
     });
 });
 
-ponder.on("CoinSwapAbi:Refund", async ({ event, context }) => {
+ponder.on("CoinSwapCitrea:Refund", async ({ event, context }) => {
+  const id = createLockupId(context.chain.id, event.args.preimageHash);
   await context.db
-    .update(lockups, { preimageHash: event.args.preimageHash })
+    .update(lockups, { id })
     .set({
       refunded: true,
       refundTxHash: event.transaction.hash,
     });
 });
 
+// ===== CITREA: ERC20Swap (JUSD) =====
 ponder.on("ERC20SwapCitrea:Lockup", async ({ event, context }) => {
-  const lockupData = {
+  const id = createLockupId(context.chain.id, event.args.preimageHash);
+
+  const lockupData: LockupData = {
+    id,
     preimageHash: event.args.preimageHash,
     amount: event.args.amount,
     claimAddress: event.args.claimAddress,
@@ -72,28 +145,15 @@ ponder.on("ERC20SwapCitrea:Lockup", async ({ event, context }) => {
   };
 
   await context.db.insert(lockups).values(lockupData);
-
-  const store = getPreimageStore();
-  const registered = store.get(event.args.preimageHash);
-
-  if (registered) {
-    executeAutoClaim(registered.preimage, lockupData, context.chain.id)
-      .then((result) => {
-        if (result.success) {
-          console.log(`Auto-claim successful for ${event.args.preimageHash}: ${result.txHash}`);
-        } else if (result.error?.includes("no Ether locked") || result.error?.includes("no tokens locked")) {
-          console.log(`Auto-claim skipped for ${event.args.preimageHash}: already claimed`);
-        } else {
-          console.error(`Auto-claim failed for ${event.args.preimageHash}: ${result.error}`);
-        }
-      })
-      .catch((err) => console.error("Auto-claim error:", err));
-  }
+  handleAutoClaimForLockup(lockupData).catch((err) => {
+    console.error("Uncaught error in handleAutoClaimForLockup:", err);
+  });
 });
 
 ponder.on("ERC20SwapCitrea:Claim", async ({ event, context }) => {
+  const id = createLockupId(context.chain.id, event.args.preimageHash);
   await context.db
-    .update(lockups, { preimageHash: event.args.preimageHash })
+    .update(lockups, { id })
     .set({
       claimed: true,
       claimTxHash: event.transaction.hash,
@@ -102,8 +162,99 @@ ponder.on("ERC20SwapCitrea:Claim", async ({ event, context }) => {
 });
 
 ponder.on("ERC20SwapCitrea:Refund", async ({ event, context }) => {
+  const id = createLockupId(context.chain.id, event.args.preimageHash);
   await context.db
-    .update(lockups, { preimageHash: event.args.preimageHash })
+    .update(lockups, { id })
+    .set({
+      refunded: true,
+      refundTxHash: event.transaction.hash,
+    });
+});
+
+// ===== POLYGON: ERC20Swap (USDT) =====
+ponder.on("ERC20SwapPolygon:Lockup", async ({ event, context }) => {
+  const id = createLockupId(context.chain.id, event.args.preimageHash);
+
+  const lockupData: LockupData = {
+    id,
+    preimageHash: event.args.preimageHash,
+    amount: event.args.amount,
+    claimAddress: event.args.claimAddress,
+    refundAddress: event.args.refundAddress,
+    timelock: event.args.timelock,
+    tokenAddress: event.args.tokenAddress,
+    swapType: SwapType.ERC20,
+    chainId: context.chain.id,
+    claimed: false,
+    refunded: false,
+  };
+
+  await context.db.insert(lockups).values(lockupData);
+  handleAutoClaimForLockup(lockupData).catch((err) => {
+    console.error("Uncaught error in handleAutoClaimForLockup:", err);
+  });
+});
+
+ponder.on("ERC20SwapPolygon:Claim", async ({ event, context }) => {
+  const id = createLockupId(context.chain.id, event.args.preimageHash);
+  await context.db
+    .update(lockups, { id })
+    .set({
+      claimed: true,
+      claimTxHash: event.transaction.hash,
+      preimage: event.args.preimage,
+    });
+});
+
+ponder.on("ERC20SwapPolygon:Refund", async ({ event, context }) => {
+  const id = createLockupId(context.chain.id, event.args.preimageHash);
+  await context.db
+    .update(lockups, { id })
+    .set({
+      refunded: true,
+      refundTxHash: event.transaction.hash,
+    });
+});
+
+// ===== ETHEREUM: ERC20Swap (USDT/USDC) =====
+ponder.on("ERC20SwapEthereum:Lockup", async ({ event, context }) => {
+  const id = createLockupId(context.chain.id, event.args.preimageHash);
+
+  const lockupData: LockupData = {
+    id,
+    preimageHash: event.args.preimageHash,
+    amount: event.args.amount,
+    claimAddress: event.args.claimAddress,
+    refundAddress: event.args.refundAddress,
+    timelock: event.args.timelock,
+    tokenAddress: event.args.tokenAddress,
+    swapType: SwapType.ERC20,
+    chainId: context.chain.id,
+    claimed: false,
+    refunded: false,
+  };
+
+  await context.db.insert(lockups).values(lockupData);
+  handleAutoClaimForLockup(lockupData).catch((err) => {
+    console.error("Uncaught error in handleAutoClaimForLockup:", err);
+  });
+});
+
+ponder.on("ERC20SwapEthereum:Claim", async ({ event, context }) => {
+  const id = createLockupId(context.chain.id, event.args.preimageHash);
+  await context.db
+    .update(lockups, { id })
+    .set({
+      claimed: true,
+      claimTxHash: event.transaction.hash,
+      preimage: event.args.preimage,
+    });
+});
+
+ponder.on("ERC20SwapEthereum:Refund", async ({ event, context }) => {
+  const id = createLockupId(context.chain.id, event.args.preimageHash);
+  await context.db
+    .update(lockups, { id })
     .set({
       refunded: true,
       refundTxHash: event.transaction.hash,
