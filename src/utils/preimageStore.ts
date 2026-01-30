@@ -104,42 +104,51 @@ class PreimageStore {
   }
 
   /**
-   * Atomically mark preimage as 'in_progress' if currently 'pending'.
-   * Returns true if successful (was pending), false if already in_progress/completed/failed.
-   * This prevents race conditions where multiple lockup events try to claim the same preimage.
+   * In-memory cache to track claim status per chain.
+   * Key format: `${preimageHash}:${chainId}`
+   *
+   * This prevents race conditions where multiple lockup events try to claim
+   * the same preimage simultaneously on the same chain.
+   *
+   * NOTE: Different chains can claim independently - e.g., Citrea claim for user
+   * and Ethereum claim for Boltz can both proceed for the same preimageHash.
+   *
+   * The cache is not persistent, but that's OK because:
+   * 1. The smart contract prevents double claims ("no tokens locked")
+   * 2. After restart, a retry will just fail gracefully and be marked as completed
    */
-  markInProgress(preimageHash: string): boolean {
-    const stmt = this.db.prepare(`
-      UPDATE registered_preimages
-      SET status = 'in_progress'
-      WHERE preimage_hash = ? AND status = 'pending'
-    `);
-    const result = stmt.run(preimageHash);
-    return result.changes > 0;
+  private claimStatusCache: Map<string, PreimageStatus> = new Map();
+
+  /**
+   * Atomically mark preimage as 'in_progress' for a specific chain.
+   * Returns true if successful, false if already in_progress/completed for this chain.
+   */
+  markInProgress(preimageHash: string, chainId: number): boolean {
+    const key = `${preimageHash}:${chainId}`;
+    const existing = this.claimStatusCache.get(key);
+
+    if (existing === 'in_progress' || existing === 'completed') {
+      return false;
+    }
+
+    this.claimStatusCache.set(key, 'in_progress');
+    return true;
   }
 
   /**
-   * Mark preimage as completed (successfully claimed).
+   * Mark preimage as completed (successfully claimed) for a specific chain.
    */
-  markCompleted(preimageHash: string): void {
-    const stmt = this.db.prepare(`
-      UPDATE registered_preimages
-      SET status = 'completed'
-      WHERE preimage_hash = ?
-    `);
-    stmt.run(preimageHash);
+  markCompleted(preimageHash: string, chainId: number): void {
+    const key = `${preimageHash}:${chainId}`;
+    this.claimStatusCache.set(key, 'completed');
   }
 
   /**
-   * Mark preimage as failed (claim failed, can be retried).
+   * Mark preimage as failed (claim failed, can be retried) for a specific chain.
    */
-  markFailed(preimageHash: string): void {
-    const stmt = this.db.prepare(`
-      UPDATE registered_preimages
-      SET status = 'pending'
-      WHERE preimage_hash = ?
-    `);
-    stmt.run(preimageHash);
+  markFailed(preimageHash: string, chainId: number): void {
+    const key = `${preimageHash}:${chainId}`;
+    this.claimStatusCache.delete(key);
   }
 
   delete(preimageHash: string): void {

@@ -54,10 +54,11 @@ async function handleAutoClaimForLockup(lockupData: LockupData): Promise<void> {
 
   // CRITICAL: Atomically mark as 'in_progress' BEFORE starting the claim.
   // This prevents race conditions where multiple lockup events (or duplicate events)
-  // try to claim the same preimage simultaneously.
-  const acquired = store.markInProgress(lockupData.preimageHash);
+  // try to claim the same preimage simultaneously ON THE SAME CHAIN.
+  // Different chains can claim independently (e.g., user claims on Citrea, Boltz claims on Ethereum).
+  const acquired = store.markInProgress(lockupData.preimageHash, lockupData.chainId);
   if (!acquired) {
-    console.log(`[${lockupData.chainId}] Auto-claim skipped for ${lockupData.preimageHash}: already in progress or completed`);
+    console.log(`[${lockupData.chainId}] Auto-claim skipped for ${lockupData.preimageHash}: already in progress or completed on this chain`);
     return;
   }
 
@@ -66,18 +67,18 @@ async function handleAutoClaimForLockup(lockupData: LockupData): Promise<void> {
 
     if (result.success) {
       console.log(`[${lockupData.chainId}] Auto-claim successful for ${lockupData.preimageHash}: ${result.txHash}`);
-      store.markCompleted(lockupData.preimageHash);
+      store.markCompleted(lockupData.preimageHash, lockupData.chainId);
     } else if (result.error?.includes("no Ether locked") || result.error?.includes("no tokens locked")) {
       console.log(`[${lockupData.chainId}] Auto-claim skipped for ${lockupData.preimageHash}: already claimed`);
-      store.markCompleted(lockupData.preimageHash);
+      store.markCompleted(lockupData.preimageHash, lockupData.chainId);
     } else {
       console.error(`[${lockupData.chainId}] Auto-claim failed for ${lockupData.preimageHash}: ${result.error}`);
-      // Mark as failed (resets to pending) so it can be retried
-      store.markFailed(lockupData.preimageHash);
+      // Mark as failed (resets to pending) so it can be retried on this chain
+      store.markFailed(lockupData.preimageHash, lockupData.chainId);
     }
   } catch (err) {
     console.error(`[${lockupData.chainId}] Auto-claim error:`, err);
-    store.markFailed(lockupData.preimageHash);
+    store.markFailed(lockupData.preimageHash, lockupData.chainId);
   }
 }
 
