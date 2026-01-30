@@ -10,12 +10,12 @@ const targetChain = (process.env.TARGET_CHAIN as "testnet" | "mainnet") || "main
 const config = {
   testnet: {
     citrea: { chainId: CHAIN_IDS.CITREA_TESTNET },
-    polygon: { chainId: CHAIN_IDS.POLYGON_TESTNET_AMOY },
+    polygon: { chainId: CHAIN_IDS.POLYGON_MAINNET },
     ethereum: { chainId: CHAIN_IDS.ETHEREUM_MAINNET },
     contracts: {
       citreaERC20: CONTRACT_ADDRESSES[CHAIN_IDS.CITREA_TESTNET]!.erc20Swap,
       citreaCoin: CONTRACT_ADDRESSES[CHAIN_IDS.CITREA_TESTNET]!.coinSwap!,
-      polygonERC20: CONTRACT_ADDRESSES[CHAIN_IDS.POLYGON_TESTNET_AMOY]!.erc20Swap,
+      polygonERC20: CONTRACT_ADDRESSES[CHAIN_IDS.POLYGON_MAINNET]!.erc20Swap,
       ethereumERC20: CONTRACT_ADDRESSES[CHAIN_IDS.ETHEREUM_MAINNET]!.erc20Swap,
     },
     startBlocks: { citrea: 18332348, polygon: 50000000, ethereum: 19000000 },
