@@ -101,9 +101,6 @@ ponder.on("CoinSwapCitrea:Lockup", async ({ event, context }) => {
   };
 
   await context.db.insert(lockups).values(lockupData).onConflictDoNothing();
-  handleAutoClaimForLockup(lockupData).catch((err) => {
-    console.error("Uncaught error in handleAutoClaimForLockup:", err);
-  });
 });
 
 ponder.on("CoinSwapCitrea:Claim", async ({ event, context }) => {
@@ -146,9 +143,6 @@ ponder.on("ERC20SwapCitrea:Lockup", async ({ event, context }) => {
   };
 
   await context.db.insert(lockups).values(lockupData).onConflictDoNothing();
-  handleAutoClaimForLockup(lockupData).catch((err) => {
-    console.error("Uncaught error in handleAutoClaimForLockup:", err);
-  });
 });
 
 ponder.on("ERC20SwapCitrea:Claim", async ({ event, context }) => {
@@ -191,9 +185,6 @@ ponder.on("ERC20SwapPolygon:Lockup", async ({ event, context }) => {
   };
 
   await context.db.insert(lockups).values(lockupData).onConflictDoNothing();
-  handleAutoClaimForLockup(lockupData).catch((err) => {
-    console.error("Uncaught error in handleAutoClaimForLockup:", err);
-  });
 });
 
 ponder.on("ERC20SwapPolygon:Claim", async ({ event, context }) => {
@@ -236,9 +227,6 @@ ponder.on("ERC20SwapEthereum:Lockup", async ({ event, context }) => {
   };
 
   await context.db.insert(lockups).values(lockupData).onConflictDoNothing();
-  handleAutoClaimForLockup(lockupData).catch((err) => {
-    console.error("Uncaught error in handleAutoClaimForLockup:", err);
-  });
 });
 
 ponder.on("ERC20SwapEthereum:Claim", async ({ event, context }) => {
