@@ -1,16 +1,24 @@
 /**
  * Validates an Ethereum address format.
  * Must be 0x followed by exactly 40 hex characters.
+ * Returns false for non-string inputs to prevent runtime crashes.
  */
 export function isValidAddress(address: string): boolean {
+  if (typeof address !== 'string') {
+    return false;
+  }
   return /^0x[a-fA-F0-9]{40}$/.test(address);
 }
 
 /**
  * Validates a preimage format.
  * Must be 32 bytes (64 hex chars), optionally with 0x prefix.
+ * Returns false for non-string inputs to prevent runtime crashes.
  */
 export function isValidPreimage(preimage: string): boolean {
+  if (typeof preimage !== 'string') {
+    return false;
+  }
   // Remove 0x prefix if present
   const hex = preimage.startsWith('0x') ? preimage.slice(2) : preimage;
   // Must be exactly 64 hex characters (32 bytes)
@@ -20,6 +28,7 @@ export function isValidPreimage(preimage: string): boolean {
 /**
  * Validates a preimage hash format.
  * Must be 32 bytes (64 hex chars), optionally with 0x prefix.
+ * Returns false for non-string inputs to prevent runtime crashes.
  */
 export function isValidPreimageHash(preimageHash: string): boolean {
   // Same format as preimage (32 bytes)
