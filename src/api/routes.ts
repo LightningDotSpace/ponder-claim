@@ -179,8 +179,13 @@ routes.post("/help-me-claim", async (c: Context) => {
     const lockup = await db.select().from(lockups).where(eq(lockups.id, lockupId)).limit(1);
     lockupData = lockup[0];
 
+    // No lockup found for this specific chain - return 404 immediately
+    if (!lockupData) {
+      return c.json({ error: "Lockup not found" }, 404);
+    }
+
     // When chainId is explicit: return existing txHash if already claimed (idempotent)
-    if (lockupData?.claimed && lockupData?.claimTxHash) {
+    if (lockupData.claimed && lockupData.claimTxHash) {
       return c.json({
         success: true,
         txHash: lockupData.claimTxHash,
@@ -213,10 +218,6 @@ routes.post("/help-me-claim", async (c: Context) => {
     }
 
     lockupId = lockupData.id;
-  }
-
-  if (!lockupData) {
-    return c.json({ error: "Lockup not found" }, 404);
   }
 
   // Refunded - cannot claim
