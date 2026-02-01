@@ -201,19 +201,15 @@ routes.post("/help-me-claim", async (c: Context) => {
 
     if (!lockupData) {
       // All lockups are either claimed or refunded - provide specific error
-      const claimedLockup = allLockups.find(l => l.claimed);
       const refundedLockup = allLockups.find(l => l.refunded);
-
       if (refundedLockup) {
         return c.json({ error: "Swap was refunded", chainId: refundedLockup.chainId }, 409);
       }
-      if (claimedLockup) {
-        return c.json({
-          error: "All lockups already claimed. Please provide chainId to get specific claim details.",
-          claimedChainIds: allLockups.filter(l => l.claimed).map(l => l.chainId)
-        }, 409);
-      }
-      return c.json({ error: "No claimable lockup found" }, 404);
+      // Must be claimed (no other state possible since we filtered !claimed && !refunded)
+      return c.json({
+        error: "All lockups already claimed. Please provide chainId to get specific claim details.",
+        claimedChainIds: allLockups.filter(l => l.claimed).map(l => l.chainId)
+      }, 409);
     }
 
     lockupId = lockupData.id;
