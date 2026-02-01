@@ -163,8 +163,12 @@ routes.post("/help-me-claim", async (c: Context) => {
     return c.json({ error: "Invalid preimageHash format. Must be 32 bytes (64 hex characters), optionally with 0x prefix" }, 400);
   }
 
-  // Validate preimage format if provided
-  if (preimage && !isValidPreimage(preimage)) {
+  // Validate preimage is provided and has correct format
+  if (!preimage) {
+    return c.json({ error: "preimage is required" }, 400);
+  }
+
+  if (!isValidPreimage(preimage)) {
     return c.json({ error: "Invalid preimage format. Must be 32 bytes (64 hex characters), optionally with 0x prefix" }, 400);
   }
 
