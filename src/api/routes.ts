@@ -178,28 +178,49 @@ routes.post("/help-me-claim", async (c: Context) => {
     lockupId = createLockupId(requestedChainId, normalizedHash);
     const lockup = await db.select().from(lockups).where(eq(lockups.id, lockupId)).limit(1);
     lockupData = lockup[0];
+
+    // When chainId is explicit: return existing txHash if already claimed (idempotent)
+    if (lockupData?.claimed && lockupData?.claimTxHash) {
+      return c.json({
+        success: true,
+        txHash: lockupData.claimTxHash,
+        swapType: lockupData.swapType,
+        chainId: lockupData.chainId,
+      });
+    }
   } else {
     // Search by preimageHash across all chains
     const allLockups = await db.select().from(lockups).where(eq(lockups.preimageHash, normalizedHash));
-    // Find an unclaimed lockup
-    lockupData = allLockups.find(l => !l.claimed && !l.refunded) || allLockups[0];
-    if (lockupData) {
-      lockupId = lockupData.id;
+
+    if (!allLockups.length) {
+      return c.json({ error: "Lockup not found" }, 404);
     }
+
+    // Find an unclaimed, unrefunded lockup - NO FALLBACK to avoid returning wrong chain's data
+    lockupData = allLockups.find(l => !l.claimed && !l.refunded);
+
+    if (!lockupData) {
+      // All lockups are either claimed or refunded - provide specific error
+      const claimedLockup = allLockups.find(l => l.claimed);
+      const refundedLockup = allLockups.find(l => l.refunded);
+
+      if (refundedLockup) {
+        return c.json({ error: "Swap was refunded", chainId: refundedLockup.chainId }, 409);
+      }
+      if (claimedLockup) {
+        return c.json({
+          error: "All lockups already claimed. Please provide chainId to get specific claim details.",
+          claimedChainIds: allLockups.filter(l => l.claimed).map(l => l.chainId)
+        }, 409);
+      }
+      return c.json({ error: "No claimable lockup found" }, 404);
+    }
+
+    lockupId = lockupData.id;
   }
 
   if (!lockupData) {
     return c.json({ error: "Lockup not found" }, 404);
-  }
-
-  // Already claimed - return existing txHash
-  if (lockupData.claimed && lockupData.claimTxHash) {
-    return c.json({
-      success: true,
-      txHash: lockupData.claimTxHash,
-      swapType: lockupData.swapType,
-      chainId: lockupData.chainId,
-    });
   }
 
   // Refunded - cannot claim
