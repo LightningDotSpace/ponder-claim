@@ -15,6 +15,7 @@ export const lockups = onchainTable("lockups", (t) => ({
   refunded: t.boolean().default(false),
   claimTxHash: t.text(),
   refundTxHash: t.text(),
+  lockupTxHash: t.text(),
   preimage: t.text(),
 }), (table) => ({
   preimageHashIdx: index().on(table.preimageHash),
