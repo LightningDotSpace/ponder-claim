@@ -1,8 +1,7 @@
 import { ponder } from "ponder:registry";
 import { lockups } from "../ponder.schema";
 import { SwapType } from "../constants";
-import { executeAutoClaim } from "./utils/autoClaim";
-import { getPreimageStore } from "./utils/preimageStore";
+import { SKIP_TX_HASHES } from "../constants";
 
 // Helper for Composite ID
 const createLockupId = (chainId: number, preimageHash: string) =>
@@ -20,70 +19,15 @@ interface LockupData {
   tokenAddress: string | null;
   claimed: boolean;
   refunded: boolean;
-}
-
-/**
- * Handles auto-claim logic for lockup events.
- * CRITICAL: Marks preimage as 'in_progress' BEFORE starting the claim to prevent race conditions.
- */
-async function handleAutoClaimForLockup(lockupData: LockupData): Promise<void> {
-  const store = getPreimageStore();
-  const registered = store.get(lockupData.preimageHash);
-
-  if (!registered) return;
-
-  // Check if this is an outflow swap (targetChainId is NOT NULL in DB)
-  const isOutflowSwap = registered.targetChainId !== null;
-
-  if (isOutflowSwap) {
-    // Outflow swap: Validate chain and address match
-    const chainMatches = registered.targetChainId === lockupData.chainId;
-    const addressMatches = registered.customerAddress?.toLowerCase() === lockupData.claimAddress.toLowerCase();
-
-    if (!chainMatches) {
-      console.log(`[${lockupData.chainId}] Auto-claim skipped for ${lockupData.preimageHash}: chain mismatch (expected: ${registered.targetChainId}, got: ${lockupData.chainId})`);
-      return;
-    }
-
-    if (!addressMatches) {
-      console.log(`[${lockupData.chainId}] Auto-claim skipped for ${lockupData.preimageHash}: address mismatch (expected: ${registered.customerAddress}, got: ${lockupData.claimAddress})`);
-      return;
-    }
-  }
-  // Inflow swaps (targetChainId === null): Always proceed with claim (legacy behavior)
-
-  // CRITICAL: Atomically mark as 'in_progress' BEFORE starting the claim.
-  // This prevents race conditions where multiple lockup events (or duplicate events)
-  // try to claim the same preimage simultaneously ON THE SAME CHAIN.
-  // Different chains can claim independently (e.g., user claims on Citrea, Boltz claims on Ethereum).
-  const acquired = store.markInProgress(lockupData.preimageHash, lockupData.chainId);
-  if (!acquired) {
-    console.log(`[${lockupData.chainId}] Auto-claim skipped for ${lockupData.preimageHash}: already in progress or completed on this chain`);
-    return;
-  }
-
-  try {
-    const result = await executeAutoClaim(registered.preimage, lockupData, lockupData.chainId);
-
-    if (result.success) {
-      console.log(`[${lockupData.chainId}] Auto-claim successful for ${lockupData.preimageHash}: ${result.txHash}`);
-      store.markCompleted(lockupData.preimageHash, lockupData.chainId);
-    } else if (result.error?.includes("no Ether locked") || result.error?.includes("no tokens locked")) {
-      console.log(`[${lockupData.chainId}] Auto-claim skipped for ${lockupData.preimageHash}: already claimed`);
-      store.markCompleted(lockupData.preimageHash, lockupData.chainId);
-    } else {
-      console.error(`[${lockupData.chainId}] Auto-claim failed for ${lockupData.preimageHash}: ${result.error}`);
-      // Mark as failed (resets to pending) so it can be retried on this chain
-      store.markFailed(lockupData.preimageHash, lockupData.chainId);
-    }
-  } catch (err) {
-    console.error(`[${lockupData.chainId}] Auto-claim error:`, err);
-    store.markFailed(lockupData.preimageHash, lockupData.chainId);
-  }
+  lockupTxHash: string;
 }
 
 // ===== CITREA: CoinSwap (cBTC) =====
 ponder.on("CoinSwapCitrea:Lockup", async ({ event, context }) => {
+  if (SKIP_TX_HASHES.includes(event.transaction.hash)) {
+    return;
+  }
+
   const id = createLockupId(context.chain.id, event.args.preimageHash);
 
   const lockupData: LockupData = {
@@ -98,12 +42,16 @@ ponder.on("CoinSwapCitrea:Lockup", async ({ event, context }) => {
     tokenAddress: null,
     claimed: false,
     refunded: false,
+    lockupTxHash: event.transaction.hash,
   };
 
   await context.db.insert(lockups).values(lockupData).onConflictDoNothing();
 });
 
 ponder.on("CoinSwapCitrea:Claim", async ({ event, context }) => {
+  if (SKIP_TX_HASHES.includes(event.transaction.hash)) {
+    return;
+  }
   const id = createLockupId(context.chain.id, event.args.preimageHash);
   await context.db
     .update(lockups, { id })
@@ -121,6 +69,7 @@ ponder.on("CoinSwapCitrea:Refund", async ({ event, context }) => {
     .set({
       refunded: true,
       refundTxHash: event.transaction.hash,
+      lockupTxHash: event.transaction.hash,
     });
 });
 
@@ -140,6 +89,7 @@ ponder.on("ERC20SwapCitrea:Lockup", async ({ event, context }) => {
     chainId: context.chain.id,
     claimed: false,
     refunded: false,
+    lockupTxHash: event.transaction.hash,
   };
 
   await context.db.insert(lockups).values(lockupData).onConflictDoNothing();
@@ -182,6 +132,7 @@ ponder.on("ERC20SwapPolygon:Lockup", async ({ event, context }) => {
     chainId: context.chain.id,
     claimed: false,
     refunded: false,
+    lockupTxHash: event.transaction.hash,
   };
 
   await context.db.insert(lockups).values(lockupData).onConflictDoNothing();
@@ -224,6 +175,7 @@ ponder.on("ERC20SwapEthereum:Lockup", async ({ event, context }) => {
     chainId: context.chain.id,
     claimed: false,
     refunded: false,
+    lockupTxHash: event.transaction.hash,
   };
 
   await context.db.insert(lockups).values(lockupData).onConflictDoNothing();
