@@ -20,3 +20,13 @@ export const lockups = onchainTable("lockups", (t) => ({
 }), (table) => ({
   preimageHashIdx: index().on(table.preimageHash),
 }));
+
+export const volumeStat = onchainTable("volumeStat", (t) => ({
+  id: t.text().primaryKey(),
+  chainId: t.integer().notNull(),
+  tokenAddress: t.text().notNull(),
+  timestamp: t.bigint().notNull(),
+  txCount: t.integer().notNull(),
+  volume: t.bigint().notNull(),
+  type: t.text().notNull(),
+}));
