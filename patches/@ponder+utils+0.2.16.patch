@@ -1,0 +1,13 @@
+diff --git a/node_modules/@ponder/utils/src/getLogsRetryHelper.ts b/node_modules/@ponder/utils/src/getLogsRetryHelper.ts
+index 2140f4e..b21085b 100644
+--- a/node_modules/@ponder/utils/src/getLogsRetryHelper.ts
++++ b/node_modules/@ponder/utils/src/getLogsRetryHelper.ts
+@@ -251,7 +251,7 @@ export const getLogsRetryHelper = ({
+   if (match !== null) {
+     const ranges = chunk({
+       params,
+-      range: BigInt(match[1]!.replace(/[,.]/g, "")),
++      range: BigInt(match[1]!.replace(/[,.]/g, "")) - 1n,
+     });
+ 
+     if (isRangeUnchanged(params, ranges) === false) {
