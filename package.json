@@ -9,7 +9,8 @@
     "db": "ponder db",
     "codegen": "ponder codegen",
     "lint": "eslint .",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@hono/swagger-ui": "^0.5.2",
@@ -24,6 +25,7 @@
     "@types/node": "^20.9.0",
     "eslint": "^8.53.0",
     "eslint-config-ponder": "^0.15.10",
+    "patch-package": "^8.0.1",
     "typescript": "^5.2.2"
   },
   "engines": {
