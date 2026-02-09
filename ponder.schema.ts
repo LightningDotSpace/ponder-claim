@@ -21,6 +21,13 @@ export const lockups = onchainTable("lockups", (t) => ({
   preimageHashIdx: index().on(table.preimageHash),
 }));
 
+export const lockupsRelations = relations(lockups, ({ one }) => ({
+  knownPreimage: one(knownPreimageHashes, {
+    fields: [lockups.preimageHash],
+    references: [knownPreimageHashes.preimageHash],
+  }),
+}));
+
 export const volumeStat = onchainTable("volumeStat", (t) => ({
   id: t.text().primaryKey(),
   chainId: t.integer().notNull(),
@@ -37,6 +44,7 @@ export const knownPreimageHashes = onchainTable("knownPreimageHashes", (t) => ({
 }));
 
 export const knownPreimageHashesRelations = relations(knownPreimageHashes, ({ many }) => ({
+  currentLockup: many(lockups),
   lockups: many(rawLockups),
   claims: many(rawClaims),
   refunds: many(rawRefunds),
