@@ -1,8 +1,9 @@
 import { ponder } from "ponder:registry";
-import { lockups, volumeStat } from "../ponder.schema";
+import { knownPreimageHashes, lockups, rawLockups, rawClaims, rawRefunds, volumeStat } from "../ponder.schema";
 import { SwapType } from "../constants";
 import { SKIP_TX_HASHES } from "../constants";
 import { TEMPORAL_FRAMES, getIdByTemporalFrame, getTimestampByTemporalFrame } from "./utils/timestamps";
+import { prefix0x } from "./utils/evm";
 
 // Helper for Composite ID
 const createLockupId = (chainId: number, preimageHash: string) =>
@@ -60,6 +61,25 @@ interface LockupData {
 
 // ===== CITREA: CoinSwap (cBTC) =====
 ponder.on("CoinSwapCitrea:Lockup", async ({ event, context }) => {
+  await context.db.insert(knownPreimageHashes).values({
+    preimageHash: prefix0x(event.args.preimageHash)
+  }).onConflictDoNothing();
+
+  await context.db.insert(rawLockups).values({
+    id: event.id,
+    preimageHash: prefix0x(event.args.preimageHash),
+    chainId: context.chain.id,
+    amount: event.args.amount,
+    claimAddress: event.args.claimAddress,
+    refundAddress: event.args.refundAddress,
+    timelock: event.args.timelock,
+    tokenAddress: null,
+    swapType: SwapType.NATIVE,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp,
+  });
+
   if (SKIP_TX_HASHES.includes(event.transaction.hash)) {
     return;
   }
@@ -93,6 +113,24 @@ ponder.on("CoinSwapCitrea:Lockup", async ({ event, context }) => {
 });
 
 ponder.on("CoinSwapCitrea:Claim", async ({ event, context }) => {
+  await context.db.insert(rawClaims).values({
+    id: event.id,
+    preimageHash: prefix0x(event.args.preimageHash),
+    preimage: event.args.preimage,
+    chainId: context.chain.id,
+    swapType: SwapType.NATIVE,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp,
+  });
+
+  await context.db.insert(knownPreimageHashes).values({
+    preimageHash: prefix0x(event.args.preimageHash),
+    preimage: event.args.preimage,
+  }).onConflictDoUpdate((row: any) => ({
+    preimage: event.args.preimage,
+  }));
+
   if (SKIP_TX_HASHES.includes(event.transaction.hash)) {
     return;
   }
@@ -107,6 +145,16 @@ ponder.on("CoinSwapCitrea:Claim", async ({ event, context }) => {
 });
 
 ponder.on("CoinSwapCitrea:Refund", async ({ event, context }) => {
+  await context.db.insert(rawRefunds).values({
+    id: event.id,
+    preimageHash: prefix0x(event.args.preimageHash),
+    chainId: context.chain.id,
+    swapType: SwapType.NATIVE,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp,
+  });
+
   const id = createLockupId(context.chain.id, event.args.preimageHash);
   await context.db
     .update(lockups, { id })
@@ -119,6 +167,25 @@ ponder.on("CoinSwapCitrea:Refund", async ({ event, context }) => {
 
 // ===== CITREA: ERC20Swap (JUSD) =====
 ponder.on("ERC20SwapCitrea:Lockup", async ({ event, context }) => {
+  await context.db.insert(knownPreimageHashes).values({
+    preimageHash: prefix0x(event.args.preimageHash)
+  }).onConflictDoNothing();
+
+  await context.db.insert(rawLockups).values({
+    id: event.id,
+    preimageHash: prefix0x(event.args.preimageHash),
+    chainId: context.chain.id,
+    amount: event.args.amount,
+    claimAddress: event.args.claimAddress,
+    refundAddress: event.args.refundAddress,
+    timelock: event.args.timelock,
+    tokenAddress: event.args.tokenAddress,
+    swapType: SwapType.ERC20,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp,
+  });
+
   const id = createLockupId(context.chain.id, event.args.preimageHash);
 
   const lockupData: LockupData = {
@@ -148,6 +215,24 @@ ponder.on("ERC20SwapCitrea:Lockup", async ({ event, context }) => {
 });
 
 ponder.on("ERC20SwapCitrea:Claim", async ({ event, context }) => {
+  await context.db.insert(rawClaims).values({
+    id: event.id,
+    preimageHash: prefix0x(event.args.preimageHash),
+    preimage: event.args.preimage,
+    chainId: context.chain.id,
+    swapType: SwapType.ERC20,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp,
+  });
+
+  await context.db.insert(knownPreimageHashes).values({
+    preimageHash: prefix0x(event.args.preimageHash),
+    preimage: event.args.preimage,
+  }).onConflictDoUpdate((row: any) => ({
+    preimage: event.args.preimage,
+  }));
+
   const id = createLockupId(context.chain.id, event.args.preimageHash);
   await context.db
     .update(lockups, { id })
@@ -159,6 +244,16 @@ ponder.on("ERC20SwapCitrea:Claim", async ({ event, context }) => {
 });
 
 ponder.on("ERC20SwapCitrea:Refund", async ({ event, context }) => {
+  await context.db.insert(rawRefunds).values({
+    id: event.id,
+    preimageHash: prefix0x(event.args.preimageHash),
+    chainId: context.chain.id,
+    swapType: SwapType.ERC20,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp,
+  });
+
   const id = createLockupId(context.chain.id, event.args.preimageHash);
   await context.db
     .update(lockups, { id })
@@ -170,6 +265,25 @@ ponder.on("ERC20SwapCitrea:Refund", async ({ event, context }) => {
 
 // ===== POLYGON: ERC20Swap (USDT) =====
 ponder.on("ERC20SwapPolygon:Lockup", async ({ event, context }) => {
+  await context.db.insert(knownPreimageHashes).values({
+    preimageHash: prefix0x(event.args.preimageHash)
+  }).onConflictDoNothing();
+
+  await context.db.insert(rawLockups).values({
+    id: event.id,
+    preimageHash: prefix0x(event.args.preimageHash),
+    chainId: context.chain.id,
+    amount: event.args.amount,
+    claimAddress: event.args.claimAddress,
+    refundAddress: event.args.refundAddress,
+    timelock: event.args.timelock,
+    tokenAddress: event.args.tokenAddress,
+    swapType: SwapType.ERC20,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp,
+  });
+
   const id = createLockupId(context.chain.id, event.args.preimageHash);
 
   const lockupData: LockupData = {
@@ -199,6 +313,24 @@ ponder.on("ERC20SwapPolygon:Lockup", async ({ event, context }) => {
 });
 
 ponder.on("ERC20SwapPolygon:Claim", async ({ event, context }) => {
+  await context.db.insert(rawClaims).values({
+    id: event.id,
+    preimageHash: prefix0x(event.args.preimageHash),
+    preimage: event.args.preimage,
+    chainId: context.chain.id,
+    swapType: SwapType.ERC20,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp,
+  });
+
+  await context.db.insert(knownPreimageHashes).values({
+    preimageHash: prefix0x(event.args.preimageHash),
+    preimage: event.args.preimage,
+  }).onConflictDoUpdate((row: any) => ({
+    preimage: event.args.preimage,
+  }));
+
   const id = createLockupId(context.chain.id, event.args.preimageHash);
   await context.db
     .update(lockups, { id })
@@ -210,6 +342,16 @@ ponder.on("ERC20SwapPolygon:Claim", async ({ event, context }) => {
 });
 
 ponder.on("ERC20SwapPolygon:Refund", async ({ event, context }) => {
+  await context.db.insert(rawRefunds).values({
+    id: event.id,
+    preimageHash: prefix0x(event.args.preimageHash),
+    chainId: context.chain.id,
+    swapType: SwapType.ERC20,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp,
+  });
+
   const id = createLockupId(context.chain.id, event.args.preimageHash);
   await context.db
     .update(lockups, { id })
@@ -221,6 +363,25 @@ ponder.on("ERC20SwapPolygon:Refund", async ({ event, context }) => {
 
 // ===== ETHEREUM: ERC20Swap (USDT/USDC) =====
 ponder.on("ERC20SwapEthereum:Lockup", async ({ event, context }) => {
+  await context.db.insert(knownPreimageHashes).values({
+    preimageHash: prefix0x(event.args.preimageHash)
+  }).onConflictDoNothing();
+
+  await context.db.insert(rawLockups).values({
+    id: event.id,
+    preimageHash: prefix0x(event.args.preimageHash),
+    chainId: context.chain.id,
+    amount: event.args.amount,
+    claimAddress: event.args.claimAddress,
+    refundAddress: event.args.refundAddress,
+    timelock: event.args.timelock,
+    tokenAddress: event.args.tokenAddress,
+    swapType: SwapType.ERC20,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp,
+  });
+
   const id = createLockupId(context.chain.id, event.args.preimageHash);
 
   const lockupData: LockupData = {
@@ -250,6 +411,24 @@ ponder.on("ERC20SwapEthereum:Lockup", async ({ event, context }) => {
 });
 
 ponder.on("ERC20SwapEthereum:Claim", async ({ event, context }) => {
+  await context.db.insert(rawClaims).values({
+    id: event.id,
+    preimageHash: prefix0x(event.args.preimageHash),
+    preimage: event.args.preimage,
+    chainId: context.chain.id,
+    swapType: SwapType.ERC20,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp,
+  });
+
+  await context.db.insert(knownPreimageHashes).values({
+    preimageHash: prefix0x(event.args.preimageHash),
+    preimage: event.args.preimage,
+  }).onConflictDoUpdate((row: any) => ({
+    preimage: event.args.preimage,
+  }));
+
   const id = createLockupId(context.chain.id, event.args.preimageHash);
   await context.db
     .update(lockups, { id })
@@ -261,6 +440,16 @@ ponder.on("ERC20SwapEthereum:Claim", async ({ event, context }) => {
 });
 
 ponder.on("ERC20SwapEthereum:Refund", async ({ event, context }) => {
+  await context.db.insert(rawRefunds).values({
+    id: event.id,
+    preimageHash: prefix0x(event.args.preimageHash),
+    chainId: context.chain.id,
+    swapType: SwapType.ERC20,
+    txHash: event.transaction.hash,
+    blockNumber: event.block.number,
+    timestamp: event.block.timestamp,
+  });
+
   const id = createLockupId(context.chain.id, event.args.preimageHash);
   await context.db
     .update(lockups, { id })
