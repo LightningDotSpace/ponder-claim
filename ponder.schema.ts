@@ -1,4 +1,4 @@
-import { onchainTable, index } from "ponder";
+import { onchainTable, index, relations } from "ponder";
 
 export const lockups = onchainTable("lockups", (t) => ({
   // Composite ID: chainId:preimageHash
@@ -30,3 +30,72 @@ export const volumeStat = onchainTable("volumeStat", (t) => ({
   volume: t.bigint().notNull(),
   type: t.text().notNull(),
 }));
+
+export const knownPreimageHashes = onchainTable("knownPreimageHashes", (t) => ({
+  preimageHash: t.text().primaryKey(),
+  preimage: t.text()
+}));
+
+export const knownPreimageHashesRelations = relations(knownPreimageHashes, ({ many }) => ({
+  lockups: many(rawLockups),
+  claims: many(rawClaims),
+  refunds: many(rawRefunds),
+}));
+
+export const rawLockups = onchainTable("rawLockups", (t) => ({
+  id: t.text().primaryKey(),
+  preimageHash: t.text().notNull(),
+  chainId: t.integer().notNull(),
+  amount: t.bigint(),
+  claimAddress: t.text(),
+  refundAddress: t.text(),
+  timelock: t.bigint(),
+  tokenAddress: t.text(),
+  swapType: t.text(),
+  txHash: t.text().notNull(),
+  blockNumber: t.bigint().notNull(),
+  timestamp: t.bigint().notNull(),
+}));
+
+export const rawLockupsRelations = relations(rawLockups, ({ one }) => ({
+  knownPreimage: one(knownPreimageHashes, {
+    fields: [rawLockups.preimageHash],
+    references: [knownPreimageHashes.preimageHash],
+  }),
+}));
+
+export const rawClaims = onchainTable("rawClaims", (t) => ({
+  id: t.text().primaryKey(),
+  preimageHash: t.text().notNull(),
+  preimage: t.text().notNull(),
+  chainId: t.integer().notNull(),
+  swapType: t.text(),
+  txHash: t.text().notNull(),
+  blockNumber: t.bigint().notNull(),
+  timestamp: t.bigint().notNull(),
+}));
+
+export const rawClaimsRelations = relations(rawClaims, ({ one }) => ({
+  knownPreimage: one(knownPreimageHashes, {
+    fields: [rawClaims.preimageHash],
+    references: [knownPreimageHashes.preimageHash],
+  }),
+}));
+
+export const rawRefunds = onchainTable("rawRefunds", (t) => ({
+  id: t.text().primaryKey(),
+  preimageHash: t.text().notNull(),
+  chainId: t.integer().notNull(),
+  swapType: t.text(),
+  txHash: t.text().notNull(),
+  blockNumber: t.bigint().notNull(),
+  timestamp: t.bigint().notNull(),
+}));
+
+export const rawRefundsRelations = relations(rawRefunds, ({ one }) => ({
+  knownPreimage: one(knownPreimageHashes, {
+    fields: [rawRefunds.preimageHash],
+    references: [knownPreimageHashes.preimageHash],
+  }),
+}));
+
