@@ -50,6 +50,7 @@ interface LockupData {
   amount: bigint;
   claimAddress: string;
   refundAddress: string;
+  senderAddress: string;
   timelock: bigint;
   swapType: string;
   chainId: number;
@@ -72,6 +73,7 @@ ponder.on("CoinSwapCitrea:Lockup", async ({ event, context }) => {
     amount: event.args.amount,
     claimAddress: event.args.claimAddress,
     refundAddress: event.args.refundAddress,
+    senderAddress: event.transaction.from,
     timelock: event.args.timelock,
     tokenAddress: null,
     swapType: SwapType.NATIVE,
@@ -92,6 +94,7 @@ ponder.on("CoinSwapCitrea:Lockup", async ({ event, context }) => {
     amount: event.args.amount,
     claimAddress: event.args.claimAddress,
     refundAddress: event.args.refundAddress,
+    senderAddress: event.transaction.from,
     timelock: event.args.timelock,
     swapType: SwapType.NATIVE,
     chainId: context.chain.id,
@@ -178,6 +181,7 @@ ponder.on("ERC20SwapCitrea:Lockup", async ({ event, context }) => {
     amount: event.args.amount,
     claimAddress: event.args.claimAddress,
     refundAddress: event.args.refundAddress,
+    senderAddress: event.transaction.from,
     timelock: event.args.timelock,
     tokenAddress: event.args.tokenAddress,
     swapType: SwapType.ERC20,
@@ -194,6 +198,7 @@ ponder.on("ERC20SwapCitrea:Lockup", async ({ event, context }) => {
     amount: event.args.amount,
     claimAddress: event.args.claimAddress,
     refundAddress: event.args.refundAddress,
+    senderAddress: event.transaction.from,
     timelock: event.args.timelock,
     tokenAddress: event.args.tokenAddress,
     swapType: SwapType.ERC20,
@@ -276,6 +281,7 @@ ponder.on("ERC20SwapPolygon:Lockup", async ({ event, context }) => {
     amount: event.args.amount,
     claimAddress: event.args.claimAddress,
     refundAddress: event.args.refundAddress,
+    senderAddress: event.transaction.from,
     timelock: event.args.timelock,
     tokenAddress: event.args.tokenAddress,
     swapType: SwapType.ERC20,
@@ -292,6 +298,7 @@ ponder.on("ERC20SwapPolygon:Lockup", async ({ event, context }) => {
     amount: event.args.amount,
     claimAddress: event.args.claimAddress,
     refundAddress: event.args.refundAddress,
+    senderAddress: event.transaction.from,
     timelock: event.args.timelock,
     tokenAddress: event.args.tokenAddress,
     swapType: SwapType.ERC20,
@@ -374,6 +381,7 @@ ponder.on("ERC20SwapEthereum:Lockup", async ({ event, context }) => {
     amount: event.args.amount,
     claimAddress: event.args.claimAddress,
     refundAddress: event.args.refundAddress,
+    senderAddress: event.transaction.from,
     timelock: event.args.timelock,
     tokenAddress: event.args.tokenAddress,
     swapType: SwapType.ERC20,
@@ -390,6 +398,7 @@ ponder.on("ERC20SwapEthereum:Lockup", async ({ event, context }) => {
     amount: event.args.amount,
     claimAddress: event.args.claimAddress,
     refundAddress: event.args.refundAddress,
+    senderAddress: event.transaction.from,
     timelock: event.args.timelock,
     tokenAddress: event.args.tokenAddress,
     swapType: SwapType.ERC20,
