@@ -45,5 +45,7 @@ export const CONTRACT_ADDRESSES: Record<number, { coinSwap?: string; erc20Swap: 
 
 export const SKIP_TX_HASHES = [
   "0xa7a7010b9053df8ceaa4074554e893cc3ae5ff6bcebf50df0f44cd684ccc8e03",
-  "0x6286477175f1cfae13d461c514bb840c7d5f0954eef31377a6b20ce2d7b616f2"
+  "0x6286477175f1cfae13d461c514bb840c7d5f0954eef31377a6b20ce2d7b616f2",
+  "0xa15f27897cbb1bd63d5bcf4cfe545547f1b7cf3519cae7c2b2a43aafffc92dec",
+  "0x447bb0603263bb30bb3ec74019a6192904a7ac5c15f4a7f2f1da9fda787cfd13"
 ];
