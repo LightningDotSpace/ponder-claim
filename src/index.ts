@@ -50,6 +50,7 @@ interface LockupData {
   amount: bigint;
   claimAddress: string;
   refundAddress: string;
+  senderAddress: string;
   timelock: bigint;
   swapType: string;
   chainId: number;
@@ -72,6 +73,7 @@ ponder.on("CoinSwapCitrea:Lockup", async ({ event, context }) => {
     amount: event.args.amount,
     claimAddress: event.args.claimAddress,
     refundAddress: event.args.refundAddress,
+    senderAddress: event.transaction.from,
     timelock: event.args.timelock,
     tokenAddress: null,
     swapType: SwapType.NATIVE,
@@ -80,36 +82,35 @@ ponder.on("CoinSwapCitrea:Lockup", async ({ event, context }) => {
     timestamp: event.block.timestamp,
   });
 
-  if (SKIP_TX_HASHES.includes(event.transaction.hash)) {
-    return;
+  if (!SKIP_TX_HASHES.includes(event.transaction.hash)) {
+    const id = createLockupId(context.chain.id, event.args.preimageHash);
+
+    const lockupData: LockupData = {
+      id,
+      preimageHash: event.args.preimageHash,
+      amount: event.args.amount,
+      claimAddress: event.args.claimAddress,
+      refundAddress: event.args.refundAddress,
+      senderAddress: event.transaction.from,
+      timelock: event.args.timelock,
+      swapType: SwapType.NATIVE,
+      chainId: context.chain.id,
+      tokenAddress: null,
+      claimed: false,
+      refunded: false,
+      lockupTxHash: event.transaction.hash,
+    };
+
+    await context.db.insert(lockups).values(lockupData).onConflictDoNothing();
+
+    await updateVolumeStat({
+      context,
+      timestamp: event.block.timestamp,
+      tokenAddress: "native",
+      amount: event.args.amount,
+      chainId: context.chain.id,
+    });
   }
-
-  const id = createLockupId(context.chain.id, event.args.preimageHash);
-
-  const lockupData: LockupData = {
-    id,
-    preimageHash: event.args.preimageHash,
-    amount: event.args.amount,
-    claimAddress: event.args.claimAddress,
-    refundAddress: event.args.refundAddress,
-    timelock: event.args.timelock,
-    swapType: SwapType.NATIVE,
-    chainId: context.chain.id,
-    tokenAddress: null,
-    claimed: false,
-    refunded: false,
-    lockupTxHash: event.transaction.hash,
-  };
-
-  await context.db.insert(lockups).values(lockupData).onConflictDoNothing();
-
-  await updateVolumeStat({
-    context,
-    timestamp: event.block.timestamp,
-    tokenAddress: "native",
-    amount: event.args.amount,
-    chainId: context.chain.id,
-  });
 });
 
 ponder.on("CoinSwapCitrea:Claim", async ({ event, context }) => {
@@ -131,17 +132,16 @@ ponder.on("CoinSwapCitrea:Claim", async ({ event, context }) => {
     preimage: event.args.preimage,
   }));
 
-  if (SKIP_TX_HASHES.includes(event.transaction.hash)) {
-    return;
+  if (!SKIP_TX_HASHES.includes(event.transaction.hash)) {
+    const id = createLockupId(context.chain.id, event.args.preimageHash);
+    await context.db
+      .update(lockups, { id })
+      .set({
+        claimed: true,
+        claimTxHash: event.transaction.hash,
+        preimage: event.args.preimage,
+      });
   }
-  const id = createLockupId(context.chain.id, event.args.preimageHash);
-  await context.db
-    .update(lockups, { id })
-    .set({
-      claimed: true,
-      claimTxHash: event.transaction.hash,
-      preimage: event.args.preimage,
-    });
 });
 
 ponder.on("CoinSwapCitrea:Refund", async ({ event, context }) => {
@@ -155,14 +155,15 @@ ponder.on("CoinSwapCitrea:Refund", async ({ event, context }) => {
     timestamp: event.block.timestamp,
   });
 
-  const id = createLockupId(context.chain.id, event.args.preimageHash);
-  await context.db
-    .update(lockups, { id })
-    .set({
-      refunded: true,
-      refundTxHash: event.transaction.hash,
-      lockupTxHash: event.transaction.hash,
-    });
+  if (!SKIP_TX_HASHES.includes(event.transaction.hash)) {
+    const id = createLockupId(context.chain.id, event.args.preimageHash);
+    await context.db
+      .update(lockups, { id })
+      .set({
+        refunded: true,
+        refundTxHash: event.transaction.hash,
+      });
+  }
 });
 
 // ===== CITREA: ERC20Swap (JUSD) =====
@@ -178,6 +179,7 @@ ponder.on("ERC20SwapCitrea:Lockup", async ({ event, context }) => {
     amount: event.args.amount,
     claimAddress: event.args.claimAddress,
     refundAddress: event.args.refundAddress,
+    senderAddress: event.transaction.from,
     timelock: event.args.timelock,
     tokenAddress: event.args.tokenAddress,
     swapType: SwapType.ERC20,
@@ -194,6 +196,7 @@ ponder.on("ERC20SwapCitrea:Lockup", async ({ event, context }) => {
     amount: event.args.amount,
     claimAddress: event.args.claimAddress,
     refundAddress: event.args.refundAddress,
+    senderAddress: event.transaction.from,
     timelock: event.args.timelock,
     tokenAddress: event.args.tokenAddress,
     swapType: SwapType.ERC20,
@@ -276,6 +279,7 @@ ponder.on("ERC20SwapPolygon:Lockup", async ({ event, context }) => {
     amount: event.args.amount,
     claimAddress: event.args.claimAddress,
     refundAddress: event.args.refundAddress,
+    senderAddress: event.transaction.from,
     timelock: event.args.timelock,
     tokenAddress: event.args.tokenAddress,
     swapType: SwapType.ERC20,
@@ -292,6 +296,7 @@ ponder.on("ERC20SwapPolygon:Lockup", async ({ event, context }) => {
     amount: event.args.amount,
     claimAddress: event.args.claimAddress,
     refundAddress: event.args.refundAddress,
+    senderAddress: event.transaction.from,
     timelock: event.args.timelock,
     tokenAddress: event.args.tokenAddress,
     swapType: SwapType.ERC20,
@@ -374,6 +379,7 @@ ponder.on("ERC20SwapEthereum:Lockup", async ({ event, context }) => {
     amount: event.args.amount,
     claimAddress: event.args.claimAddress,
     refundAddress: event.args.refundAddress,
+    senderAddress: event.transaction.from,
     timelock: event.args.timelock,
     tokenAddress: event.args.tokenAddress,
     swapType: SwapType.ERC20,
@@ -390,6 +396,7 @@ ponder.on("ERC20SwapEthereum:Lockup", async ({ event, context }) => {
     amount: event.args.amount,
     claimAddress: event.args.claimAddress,
     refundAddress: event.args.refundAddress,
+    senderAddress: event.transaction.from,
     timelock: event.args.timelock,
     tokenAddress: event.args.tokenAddress,
     swapType: SwapType.ERC20,
