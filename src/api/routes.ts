@@ -10,11 +10,14 @@ import { SwapType } from "../../constants";
 import { isValidAddress, isValidPreimage, isValidPreimageHash } from "../utils/validations";
 import { getPreimageStore } from "../utils/preimageStore";
 import { transactionQueue } from "../utils/transactionQueue";
+import { getTxDiagnostics } from "../utils/txDiagnostics";
 import { CONTRACT_ADDRESSES } from "../../constants";
 
 // Helper to create composite lockup ID
 const createLockupId = (chainId: number, preimageHash: string) =>
   `${chainId}:${preimageHash}`;
+
+const TX_WAIT_TIMEOUT_MS = 40_000;
 
 const routes = new Hono();
 
@@ -256,7 +259,7 @@ routes.post("/help-me-claim", async (c: Context) => {
           timelock
         );
 
-        const receipt = await tx.wait();
+        const receipt = await tx.wait(1, TX_WAIT_TIMEOUT_MS);
         return { txHash: receipt.hash as string, swapType: SwapType.ERC20 };
       } else if (contracts.coinSwap) {
         const coinSwap = new ethers.Contract(contracts.coinSwap, CoinSwapABI, signer);
@@ -269,7 +272,7 @@ routes.post("/help-me-claim", async (c: Context) => {
           timelock
         );
 
-        const receipt = await tx.wait();
+        const receipt = await tx.wait(1, TX_WAIT_TIMEOUT_MS);
         return { txHash: receipt.hash as string, swapType: SwapType.NATIVE };
       } else {
         throw new Error(`No CoinSwap contract for chainId ${chainId}`);
@@ -283,7 +286,9 @@ routes.post("/help-me-claim", async (c: Context) => {
       chainId,
     });
   } catch (error) {
+    const diagnostics = getTxDiagnostics(error);
     const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error("Claim failed with diagnostics:", { chainId, lockupId, diagnostics });
 
     // Check if already claimed (race condition: Auto-Claim finished but Claim Event not yet processed)
     if (errorMessage.includes("no tokens locked") || errorMessage.includes("no Ether locked")) {
@@ -301,7 +306,11 @@ routes.post("/help-me-claim", async (c: Context) => {
     console.error("Claim failed:", error);
     return c.json({
       error: "Claim transaction failed",
-      details: errorMessage
+      details: errorMessage,
+      category: diagnostics.category,
+      code: diagnostics.code,
+      replacementTxHash: diagnostics.replacementTxHash,
+      cancelled: diagnostics.cancelled,
     }, 500);
   }
 });
