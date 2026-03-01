@@ -2,16 +2,13 @@ import { db } from "ponder:api";
 import { lockups } from "ponder:schema";
 import { Context, Hono } from "hono";
 import { eq } from "ponder";
-import { ethers, formatEther } from "ethers";
-import { CoinSwapABI } from "../../abis/CoinSwap";
-import { ERC20SwapABI } from "../../abis/ERC20Swap";
+import { formatEther } from "ethers";
 import { getSigner, prefix0x } from "../utils/evm";
 import { SwapType } from "../../constants";
 import { isValidAddress, isValidPreimage, isValidPreimageHash } from "../utils/validations";
 import { getPreimageStore } from "../utils/preimageStore";
-import { transactionQueue } from "../utils/transactionQueue";
 import { getTxDiagnostics } from "../utils/txDiagnostics";
-import { signBroadcastAndWait } from "../utils/broadcastTx";
+import { claimBatcher } from "../utils/claimBatcher";
 import { CONTRACT_ADDRESSES } from "../../constants";
 
 // Helper to create composite lockup ID
@@ -239,34 +236,26 @@ routes.post("/help-me-claim", async (c: Context) => {
     return c.json({ error: "Missing chainId in lockup data" }, 500);
   }
 
+  if (amount === null || !claimAddress || !refundAddress || timelock === null) {
+    return c.json({ error: "Incomplete lockup data" }, 500);
+  }
+
   const contracts = CONTRACT_ADDRESSES[chainId];
   if (!contracts) {
     return c.json({ error: `Unsupported chainId: ${chainId}` }, 400);
   }
 
   try {
-    const result = await transactionQueue.enqueue(chainId, async () => {
-      const signer = getSigner(chainId);
-
-      if (swapType === SwapType.ERC20 || tokenAddress) {
-        const erc20Swap = new ethers.Contract(contracts.erc20Swap, ERC20SwapABI, signer);
-
-        const unsignedTx = await erc20Swap.getFunction("claim(bytes32,uint256,address,address,address,uint256)")
-          .populateTransaction(prefix0x(preimage), amount, tokenAddress, claimAddress, refundAddress, timelock);
-
-        const receipt = await signBroadcastAndWait(signer, chainId, unsignedTx, 1, TX_WAIT_TIMEOUT_MS);
-        return { txHash: receipt.hash as string, swapType: SwapType.ERC20 };
-      } else if (contracts.coinSwap) {
-        const coinSwap = new ethers.Contract(contracts.coinSwap, CoinSwapABI, signer);
-
-        const unsignedTx = await coinSwap.getFunction("claim(bytes32,uint256,address,address,uint256)")
-          .populateTransaction(prefix0x(preimage), amount, claimAddress, refundAddress, timelock);
-
-        const receipt = await signBroadcastAndWait(signer, chainId, unsignedTx, 1, TX_WAIT_TIMEOUT_MS);
-        return { txHash: receipt.hash as string, swapType: SwapType.NATIVE };
-      } else {
-        throw new Error(`No CoinSwap contract for chainId ${chainId}`);
-      }
+    const result = await claimBatcher.enqueue({
+      preimage: prefix0x(preimage),
+      amount,
+      claimAddress,
+      refundAddress,
+      timelock,
+      tokenAddress,
+      swapType: swapType || (tokenAddress ? SwapType.ERC20 : SwapType.NATIVE),
+      chainId,
+      lockupId,
     });
 
     return c.json({
@@ -274,6 +263,7 @@ routes.post("/help-me-claim", async (c: Context) => {
       txHash: result.txHash,
       swapType: result.swapType,
       chainId,
+      batched: result.batched,
     });
   } catch (error) {
     const diagnostics = getTxDiagnostics(error);
