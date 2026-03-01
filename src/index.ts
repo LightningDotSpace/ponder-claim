@@ -58,6 +58,7 @@ interface LockupData {
   claimed: boolean;
   refunded: boolean;
   lockupTxHash: string;
+  createdAt: bigint;
 }
 
 // ===== CITREA: CoinSwap (cBTC) =====
@@ -99,6 +100,7 @@ ponder.on("CoinSwapCitrea:Lockup", async ({ event, context }) => {
       claimed: false,
       refunded: false,
       lockupTxHash: event.transaction.hash,
+      createdAt: event.block.timestamp,
     };
 
     await context.db.insert(lockups).values(lockupData).onConflictDoNothing();
@@ -204,6 +206,7 @@ ponder.on("ERC20SwapCitrea:Lockup", async ({ event, context }) => {
     claimed: false,
     refunded: false,
     lockupTxHash: event.transaction.hash,
+    createdAt: event.block.timestamp,
   };
 
   await context.db.insert(lockups).values(lockupData).onConflictDoNothing();
@@ -304,6 +307,7 @@ ponder.on("ERC20SwapPolygon:Lockup", async ({ event, context }) => {
     claimed: false,
     refunded: false,
     lockupTxHash: event.transaction.hash,
+    createdAt: event.block.timestamp,
   };
 
   await context.db.insert(lockups).values(lockupData).onConflictDoNothing();
@@ -404,6 +408,7 @@ ponder.on("ERC20SwapEthereum:Lockup", async ({ event, context }) => {
     claimed: false,
     refunded: false,
     lockupTxHash: event.transaction.hash,
+    createdAt: event.block.timestamp,
   };
 
   await context.db.insert(lockups).values(lockupData).onConflictDoNothing();
