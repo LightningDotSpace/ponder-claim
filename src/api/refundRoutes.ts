@@ -46,10 +46,14 @@ async function waitForRefundedLockup(
 const refundRoutes = new Hono();
 
 refundRoutes.post("/help-me-refund", async (c: Context) => {
-  const { preimageHash, chainId: requestedChainId } = await c.req.json();
+  const { preimageHash, chainId } = await c.req.json();
 
   if (!preimageHash) {
     return c.json({ error: "preimageHash is required" }, 400);
+  }
+
+  if (!chainId) {
+    return c.json({ error: "chainId is required" }, 400);
   }
 
   if (!isValidPreimageHash(preimageHash)) {
@@ -57,59 +61,28 @@ refundRoutes.post("/help-me-refund", async (c: Context) => {
   }
 
   const normalizedHash = prefix0x(preimageHash);
+  const lockupId = createLockupId(chainId, normalizedHash);
+  const lockup = await db.select().from(lockups).where(eq(lockups.id, lockupId)).limit(1);
+  const lockupData = lockup[0];
 
-  let lockupData;
-  let lockupId: string;
+  if (!lockupData) {
+    return c.json({ error: "Lockup not found" }, 404);
+  }
 
-  if (requestedChainId) {
-    lockupId = createLockupId(requestedChainId, normalizedHash);
-    const lockup = await db.select().from(lockups).where(eq(lockups.id, lockupId)).limit(1);
-    lockupData = lockup[0];
-
-    if (!lockupData) {
-      return c.json({ error: "Lockup not found" }, 404);
-    }
-
-    if (lockupData.refunded && lockupData.refundTxHash) {
-      return c.json({
-        success: true,
-        txHash: lockupData.refundTxHash,
-        swapType: lockupData.swapType,
-        chainId: lockupData.chainId,
-      });
-    }
-  } else {
-    const allLockups = await db.select().from(lockups).where(eq(lockups.preimageHash, normalizedHash));
-
-    if (!allLockups.length) {
-      return c.json({ error: "Lockup not found" }, 404);
-    }
-
-    lockupData = allLockups.find(l => !l.claimed && !l.refunded);
-
-    if (!lockupData) {
-      const claimedLockup = allLockups.find(l => l.claimed);
-      if (claimedLockup) {
-        return c.json({ error: "Swap was already claimed", chainId: claimedLockup.chainId }, 409);
-      }
-      return c.json({
-        error: "All lockups already refunded. Provide chainId to get specific refund details.",
-        refundedChainIds: allLockups.filter(l => l.refunded).map(l => l.chainId)
-      }, 409);
-    }
-
-    lockupId = lockupData.id;
+  if (lockupData.refunded && lockupData.refundTxHash) {
+    return c.json({
+      success: true,
+      txHash: lockupData.refundTxHash,
+      swapType: lockupData.swapType,
+      chainId,
+    });
   }
 
   if (lockupData.claimed) {
     return c.json({ error: "Swap was already claimed" }, 409);
   }
 
-  const { amount, claimAddress, refundAddress, timelock, swapType, tokenAddress, chainId } = lockupData;
-
-  if (!chainId) {
-    return c.json({ error: "Missing chainId in lockup data" }, 500);
-  }
+  const { amount, claimAddress, refundAddress, timelock, swapType, tokenAddress } = lockupData;
 
   // Timelock is a block height — refund only succeeds once the chain surpasses it
   if (timelock) {
