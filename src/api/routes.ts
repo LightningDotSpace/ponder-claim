@@ -11,6 +11,7 @@ import { isValidAddress, isValidPreimage, isValidPreimageHash } from "../utils/v
 import { getPreimageStore } from "../utils/preimageStore";
 import { transactionQueue } from "../utils/transactionQueue";
 import { getTxDiagnostics } from "../utils/txDiagnostics";
+import { signBroadcastAndWait } from "../utils/broadcastTx";
 import { CONTRACT_ADDRESSES } from "../../constants";
 
 // Helper to create composite lockup ID
@@ -250,29 +251,18 @@ routes.post("/help-me-claim", async (c: Context) => {
       if (swapType === SwapType.ERC20 || tokenAddress) {
         const erc20Swap = new ethers.Contract(contracts.erc20Swap, ERC20SwapABI, signer);
 
-        const tx = await erc20Swap.getFunction("claim(bytes32,uint256,address,address,address,uint256)")(
-          prefix0x(preimage),
-          amount,
-          tokenAddress,
-          claimAddress,
-          refundAddress,
-          timelock
-        );
+        const unsignedTx = await erc20Swap.getFunction("claim(bytes32,uint256,address,address,address,uint256)")
+          .populateTransaction(prefix0x(preimage), amount, tokenAddress, claimAddress, refundAddress, timelock);
 
-        const receipt = await tx.wait(1, TX_WAIT_TIMEOUT_MS);
+        const receipt = await signBroadcastAndWait(signer, chainId, unsignedTx, 1, TX_WAIT_TIMEOUT_MS);
         return { txHash: receipt.hash as string, swapType: SwapType.ERC20 };
       } else if (contracts.coinSwap) {
         const coinSwap = new ethers.Contract(contracts.coinSwap, CoinSwapABI, signer);
 
-        const tx = await coinSwap.getFunction("claim(bytes32,uint256,address,address,uint256)")(
-          prefix0x(preimage),
-          amount,
-          claimAddress,
-          refundAddress,
-          timelock
-        );
+        const unsignedTx = await coinSwap.getFunction("claim(bytes32,uint256,address,address,uint256)")
+          .populateTransaction(prefix0x(preimage), amount, claimAddress, refundAddress, timelock);
 
-        const receipt = await tx.wait(1, TX_WAIT_TIMEOUT_MS);
+        const receipt = await signBroadcastAndWait(signer, chainId, unsignedTx, 1, TX_WAIT_TIMEOUT_MS);
         return { txHash: receipt.hash as string, swapType: SwapType.NATIVE };
       } else {
         throw new Error(`No CoinSwap contract for chainId ${chainId}`);

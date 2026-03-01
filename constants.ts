@@ -43,6 +43,25 @@ export const CONTRACT_ADDRESSES: Record<number, { coinSwap?: string; erc20Swap: 
   },
 };
 
+// Public RPCs for rebroadcasting signed transactions to multiple mempools
+export const PUBLIC_BROADCAST_RPCS: Record<number, string[]> = {
+  [CHAIN_IDS.ETHEREUM_MAINNET]: [
+    "https://eth.llamarpc.com",
+    "https://ethereum-rpc.publicnode.com",
+    "https://eth.drpc.org",
+    "https://eth-mainnet.public.blastapi.io",
+  ],
+  [CHAIN_IDS.POLYGON_MAINNET]: [
+    "https://polygon-rpc.com",
+    "https://polygon-bor-rpc.publicnode.com",
+    "https://polygon.llamarpc.com",
+    "https://polygon-mainnet.public.blastapi.io",
+  ],
+  [CHAIN_IDS.CITREA_MAINNET]: [
+    "https://rpc.citreascan.com",
+  ],
+};
+
 export const SKIP_TX_HASHES = [
   "0xa7a7010b9053df8ceaa4074554e893cc3ae5ff6bcebf50df0f44cd684ccc8e03",
   "0x6286477175f1cfae13d461c514bb840c7d5f0954eef31377a6b20ce2d7b616f2",
