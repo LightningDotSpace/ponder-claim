@@ -63,6 +63,12 @@ export async function signAndBroadcast(
 ): Promise<ethers.TransactionResponse> {
   const nonce = await acquireNonce(signer, chainId);
   const populated = await signer.populateTransaction({ ...unsignedTx, nonce });
+
+  const bump = (v: ethers.BigNumberish | null | undefined) => v != null ? (BigInt(v) * 115n) / 100n : v;
+  populated.maxFeePerGas = bump(populated.maxFeePerGas);
+  populated.maxPriorityFeePerGas = bump(populated.maxPriorityFeePerGas);
+  if (populated.gasPrice) populated.gasPrice = bump(populated.gasPrice);
+
   const signedTx = await signer.signTransaction(populated);
 
   try {
