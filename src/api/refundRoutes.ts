@@ -8,8 +8,8 @@ import { ERC20SwapABI } from "../../abis/ERC20Swap";
 import { getSigner, prefix0x } from "../utils/evm";
 import { SwapType } from "../../constants";
 import { isValidPreimageHash } from "../utils/validations";
-import { refundGuard, TxResult } from "../utils/inFlightGuard";
 import { transactionQueue } from "../utils/transactionQueue";
+import { getInFlightTxHash, setInFlightTxHash, clearInFlight } from "../utils/inFlightGuard";
 import { getTxDiagnostics } from "../utils/txDiagnostics";
 import { signAndBroadcast } from "../utils/broadcastTx";
 import { CONTRACT_ADDRESSES } from "../../constants";
@@ -105,16 +105,23 @@ refundRoutes.post("/help-me-refund", async (c: Context) => {
     return c.json({ error: `Unsupported chainId: ${chainId}` }, 400);
   }
 
-  const pending = refundGuard.acquire(normalizedHash, chainId);
-  if (pending) {
-    const result = await pending;
-    if (result.success) {
-      return c.json({ success: true, txHash: result.txHash, swapType: result.swapType, chainId });
+  const knownTxHash = getInFlightTxHash(normalizedHash, chainId);
+  if (knownTxHash) {
+    try {
+      const signer = getSigner(chainId);
+      const receipt = await signer.provider!.waitForTransaction(knownTxHash, 1, TX_WAIT_TIMEOUT_MS);
+      if (receipt && receipt.status === 1) {
+        return c.json({ success: true, txHash: knownTxHash, swapType: swapType, chainId });
+      }
+    } catch (err) {
+      const diag = getTxDiagnostics(err);
+      console.error("Wait on in-flight refund tx failed:", diag);
+      if (diag.category !== "confirmation_timeout") {
+        clearInFlight(normalizedHash, chainId);
+      }
     }
-    return c.json({ error: "Refund transaction failed", details: result.error }, 500);
   }
 
-  let guardResult: TxResult;
   try {
     const { txResponse, swapType: resolvedSwapType } = await transactionQueue.enqueue(chainId, async () => {
       const signer = getSigner(chainId);
@@ -140,34 +147,41 @@ refundRoutes.post("/help-me-refund", async (c: Context) => {
       }
     });
 
+    setInFlightTxHash(normalizedHash, chainId, txResponse.hash);
+
     const receipt = await txResponse.wait(1, TX_WAIT_TIMEOUT_MS);
     if (!receipt) throw new Error("Transaction receipt is null");
 
-    guardResult = { success: true, txHash: receipt.hash as string, swapType: resolvedSwapType };
-    refundGuard.settle(normalizedHash, chainId, guardResult);
+    clearInFlight(normalizedHash, chainId);
 
     return c.json({
       success: true,
-      txHash: guardResult.txHash,
-      swapType: guardResult.swapType,
+      txHash: receipt.hash as string,
+      swapType: resolvedSwapType,
       chainId,
     });
   } catch (error) {
     const diagnostics = getTxDiagnostics(error);
     const errorMessage = error instanceof Error ? error.message : String(error);
+
+    if (diagnostics.category !== "confirmation_timeout") {
+      clearInFlight(normalizedHash, chainId);
+    }
+
     console.error("Refund failed with diagnostics:", { chainId, lockupId, diagnostics });
 
     if (errorMessage.includes("no tokens locked") || errorMessage.includes("no Ether locked")) {
+      clearInFlight(normalizedHash, chainId);
       const refundedLockup = await waitForRefundedLockup(lockupId!);
       if (refundedLockup) {
-        guardResult = { success: true, txHash: refundedLockup.txHash, swapType: refundedLockup.swapType ?? undefined };
-        refundGuard.settle(normalizedHash, chainId, guardResult);
-        return c.json({ success: true, txHash: refundedLockup.txHash, swapType: refundedLockup.swapType, chainId });
+        return c.json({
+          success: true,
+          txHash: refundedLockup.txHash,
+          swapType: refundedLockup.swapType,
+          chainId,
+        });
       }
     }
-
-    guardResult = { success: false, error: errorMessage };
-    refundGuard.settle(normalizedHash, chainId, guardResult);
 
     console.error("Refund failed:", error);
     return c.json({
