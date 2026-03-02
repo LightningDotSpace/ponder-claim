@@ -9,8 +9,8 @@ import { getSigner, prefix0x } from "../utils/evm";
 import { SwapType } from "../../constants";
 import { isValidAddress, isValidPreimage, isValidPreimageHash } from "../utils/validations";
 import { getPreimageStore } from "../utils/preimageStore";
-import { claimGuard, TxResult } from "../utils/inFlightGuard";
 import { transactionQueue } from "../utils/transactionQueue";
+import { getInFlightTxHash, setInFlightTxHash, clearInFlight } from "../utils/inFlightGuard";
 import { getTxDiagnostics } from "../utils/txDiagnostics";
 import { signAndBroadcast } from "../utils/broadcastTx";
 import { CONTRACT_ADDRESSES } from "../../constants";
@@ -245,16 +245,23 @@ routes.post("/help-me-claim", async (c: Context) => {
     return c.json({ error: `Unsupported chainId: ${chainId}` }, 400);
   }
 
-  const pending = claimGuard.acquire(normalizedHash, chainId);
-  if (pending) {
-    const result = await pending;
-    if (result.success) {
-      return c.json({ success: true, txHash: result.txHash, swapType: result.swapType, chainId });
+  const knownTxHash = getInFlightTxHash(normalizedHash, chainId);
+  if (knownTxHash) {
+    try {
+      const signer = getSigner(chainId);
+      const receipt = await signer.provider!.waitForTransaction(knownTxHash, 1, TX_WAIT_TIMEOUT_MS);
+      if (receipt && receipt.status === 1) {
+        return c.json({ success: true, txHash: knownTxHash, swapType: swapType, chainId });
+      }
+    } catch (err) {
+      const diag = getTxDiagnostics(err);
+      console.error("Wait on in-flight claim tx failed:", diag);
+      if (diag.category !== "confirmation_timeout") {
+        clearInFlight(normalizedHash, chainId);
+      }
     }
-    return c.json({ error: "Claim transaction failed", details: result.error }, 500);
   }
 
-  let guardResult: TxResult;
   try {
     const { txResponse, swapType: resolvedSwapType } = await transactionQueue.enqueue(chainId, async () => {
       const signer = getSigner(chainId);
@@ -280,34 +287,43 @@ routes.post("/help-me-claim", async (c: Context) => {
       }
     });
 
+    setInFlightTxHash(normalizedHash, chainId, txResponse.hash);
+
     const receipt = await txResponse.wait(1, TX_WAIT_TIMEOUT_MS);
     if (!receipt) throw new Error("Transaction receipt is null");
 
-    guardResult = { success: true, txHash: receipt.hash as string, swapType: resolvedSwapType };
-    claimGuard.settle(normalizedHash, chainId, guardResult);
+    clearInFlight(normalizedHash, chainId);
+
+    const result = { txHash: receipt.hash as string, swapType: resolvedSwapType };
 
     return c.json({
       success: true,
-      txHash: guardResult.txHash,
-      swapType: guardResult.swapType,
+      txHash: result.txHash,
+      swapType: result.swapType,
       chainId,
     });
   } catch (error) {
     const diagnostics = getTxDiagnostics(error);
     const errorMessage = error instanceof Error ? error.message : String(error);
+
+    if (diagnostics.category !== "confirmation_timeout") {
+      clearInFlight(normalizedHash, chainId);
+    }
+
     console.error("Claim failed with diagnostics:", { chainId, lockupId, diagnostics });
 
     if (errorMessage.includes("no tokens locked") || errorMessage.includes("no Ether locked")) {
+      clearInFlight(normalizedHash, chainId);
       const claimedLockup = await waitForClaimedLockup(lockupId!);
       if (claimedLockup) {
-        guardResult = { success: true, txHash: claimedLockup.txHash, swapType: claimedLockup.swapType ?? undefined };
-        claimGuard.settle(normalizedHash, chainId, guardResult);
-        return c.json({ success: true, txHash: claimedLockup.txHash, swapType: claimedLockup.swapType, chainId });
+        return c.json({
+          success: true,
+          txHash: claimedLockup.txHash,
+          swapType: claimedLockup.swapType,
+          chainId,
+        });
       }
     }
-
-    guardResult = { success: false, error: errorMessage };
-    claimGuard.settle(normalizedHash, chainId, guardResult);
 
     console.error("Claim failed:", error);
     return c.json({
