@@ -245,27 +245,24 @@ routes.post("/help-me-claim", async (c: Context) => {
     return c.json({ error: `Unsupported chainId: ${chainId}` }, 400);
   }
 
-  const knownTxHash = getInFlightTxHash(normalizedHash, chainId);
+  const signer = getSigner(chainId);
+  const currentBlock = await signer.provider!.getBlockNumber();
+
+  const knownTxHash = getInFlightTxHash(normalizedHash, chainId, currentBlock);
   if (knownTxHash) {
     try {
-      const signer = getSigner(chainId);
       const receipt = await signer.provider!.waitForTransaction(knownTxHash, 1, TX_WAIT_TIMEOUT_MS);
       if (receipt && receipt.status === 1) {
+        clearInFlight(normalizedHash, chainId);
         return c.json({ success: true, txHash: knownTxHash, swapType: swapType, chainId });
       }
     } catch (err) {
-      const diag = getTxDiagnostics(err);
-      console.error("Wait on in-flight claim tx failed:", diag);
-      if (diag.category !== "confirmation_timeout") {
-        clearInFlight(normalizedHash, chainId);
-      }
+      console.error("Wait on in-flight claim tx failed:", err);
     }
   }
 
   try {
     const { txResponse, swapType: resolvedSwapType } = await transactionQueue.enqueue(chainId, async () => {
-      const signer = getSigner(chainId);
-
       if (swapType === SwapType.ERC20 || tokenAddress) {
         const erc20Swap = new ethers.Contract(contracts.erc20Swap, ERC20SwapABI, signer);
 
@@ -287,7 +284,8 @@ routes.post("/help-me-claim", async (c: Context) => {
       }
     });
 
-    setInFlightTxHash(normalizedHash, chainId, txResponse.hash);
+    const broadcastBlock = await signer.provider!.getBlockNumber();
+    setInFlightTxHash(normalizedHash, chainId, txResponse.hash, broadcastBlock);
 
     const receipt = await txResponse.wait(1, TX_WAIT_TIMEOUT_MS);
     if (!receipt) throw new Error("Transaction receipt is null");
@@ -305,17 +303,12 @@ routes.post("/help-me-claim", async (c: Context) => {
   } catch (error) {
     const diagnostics = getTxDiagnostics(error);
     const errorMessage = error instanceof Error ? error.message : String(error);
-
-    if (diagnostics.category !== "confirmation_timeout") {
-      clearInFlight(normalizedHash, chainId);
-    }
-
     console.error("Claim failed with diagnostics:", { chainId, lockupId, diagnostics });
 
     if (errorMessage.includes("no tokens locked") || errorMessage.includes("no Ether locked")) {
-      clearInFlight(normalizedHash, chainId);
       const claimedLockup = await waitForClaimedLockup(lockupId!);
       if (claimedLockup) {
+        clearInFlight(normalizedHash, chainId);
         return c.json({
           success: true,
           txHash: claimedLockup.txHash,
