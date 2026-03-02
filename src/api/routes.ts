@@ -9,7 +9,6 @@ import { getSigner, prefix0x } from "../utils/evm";
 import { SwapType } from "../../constants";
 import { isValidAddress, isValidPreimage, isValidPreimageHash } from "../utils/validations";
 import { getPreimageStore } from "../utils/preimageStore";
-import { claimGuard, TxResult } from "../utils/inFlightGuard";
 import { transactionQueue } from "../utils/transactionQueue";
 import { getTxDiagnostics } from "../utils/txDiagnostics";
 import { signAndBroadcast } from "../utils/broadcastTx";
@@ -245,16 +244,6 @@ routes.post("/help-me-claim", async (c: Context) => {
     return c.json({ error: `Unsupported chainId: ${chainId}` }, 400);
   }
 
-  const pending = claimGuard.acquire(normalizedHash, chainId);
-  if (pending) {
-    const result = await pending;
-    if (result.success) {
-      return c.json({ success: true, txHash: result.txHash, swapType: result.swapType, chainId });
-    }
-    return c.json({ error: "Claim transaction failed", details: result.error }, 500);
-  }
-
-  let guardResult: TxResult;
   try {
     const { txResponse, swapType: resolvedSwapType } = await transactionQueue.enqueue(chainId, async () => {
       const signer = getSigner(chainId);
@@ -283,13 +272,12 @@ routes.post("/help-me-claim", async (c: Context) => {
     const receipt = await txResponse.wait(1, TX_WAIT_TIMEOUT_MS);
     if (!receipt) throw new Error("Transaction receipt is null");
 
-    guardResult = { success: true, txHash: receipt.hash as string, swapType: resolvedSwapType };
-    claimGuard.settle(normalizedHash, chainId, guardResult);
+    const result = { txHash: receipt.hash as string, swapType: resolvedSwapType };
 
     return c.json({
       success: true,
-      txHash: guardResult.txHash,
-      swapType: guardResult.swapType,
+      txHash: result.txHash,
+      swapType: result.swapType,
       chainId,
     });
   } catch (error) {
@@ -297,17 +285,18 @@ routes.post("/help-me-claim", async (c: Context) => {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("Claim failed with diagnostics:", { chainId, lockupId, diagnostics });
 
+    // Check if already claimed (race condition: Auto-Claim finished but Claim Event not yet processed)
     if (errorMessage.includes("no tokens locked") || errorMessage.includes("no Ether locked")) {
       const claimedLockup = await waitForClaimedLockup(lockupId!);
       if (claimedLockup) {
-        guardResult = { success: true, txHash: claimedLockup.txHash, swapType: claimedLockup.swapType ?? undefined };
-        claimGuard.settle(normalizedHash, chainId, guardResult);
-        return c.json({ success: true, txHash: claimedLockup.txHash, swapType: claimedLockup.swapType, chainId });
+        return c.json({
+          success: true,
+          txHash: claimedLockup.txHash,
+          swapType: claimedLockup.swapType,
+          chainId,
+        });
       }
     }
-
-    guardResult = { success: false, error: errorMessage };
-    claimGuard.settle(normalizedHash, chainId, guardResult);
 
     console.error("Claim failed:", error);
     return c.json({
