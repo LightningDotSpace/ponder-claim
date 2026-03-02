@@ -18,16 +18,14 @@ function rebroadcastToPublicMempools(chainId: number, signedTx: string): void {
 }
 
 /**
- * Populate, sign, broadcast to primary + public mempools, then wait for confirmation.
- * Returns the confirmed receipt.
+ * Populate, sign, and broadcast to primary + public mempools.
+ * Returns the TransactionResponse (does NOT wait for confirmation).
  */
-export async function signBroadcastAndWait(
+export async function signAndBroadcast(
   signer: ethers.Wallet,
   chainId: number,
   unsignedTx: ethers.TransactionLike,
-  confirmations: number,
-  timeoutMs: number,
-): Promise<ethers.TransactionReceipt> {
+): Promise<ethers.TransactionResponse> {
   const populated = await signer.populateTransaction(unsignedTx);
   const signedTx = await signer.signTransaction(populated);
 
@@ -35,7 +33,5 @@ export async function signBroadcastAndWait(
 
   rebroadcastToPublicMempools(chainId, signedTx);
 
-  const receipt = await txResponse.wait(confirmations, timeoutMs);
-  if (!receipt) throw new Error("Transaction receipt is null");
-  return receipt;
+  return txResponse;
 }
