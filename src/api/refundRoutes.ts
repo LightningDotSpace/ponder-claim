@@ -8,6 +8,7 @@ import { ERC20SwapABI } from "../../abis/ERC20Swap";
 import { getSigner, prefix0x } from "../utils/evm";
 import { SwapType } from "../../constants";
 import { isValidPreimageHash } from "../utils/validations";
+import { refundGuard, TxResult } from "../utils/inFlightGuard";
 import { transactionQueue } from "../utils/transactionQueue";
 import { getTxDiagnostics } from "../utils/txDiagnostics";
 import { signAndBroadcast } from "../utils/broadcastTx";
@@ -104,6 +105,16 @@ refundRoutes.post("/help-me-refund", async (c: Context) => {
     return c.json({ error: `Unsupported chainId: ${chainId}` }, 400);
   }
 
+  const pending = refundGuard.acquire(normalizedHash, chainId);
+  if (pending) {
+    const result = await pending;
+    if (result.success) {
+      return c.json({ success: true, txHash: result.txHash, swapType: result.swapType, chainId });
+    }
+    return c.json({ error: "Refund transaction failed", details: result.error }, 500);
+  }
+
+  let guardResult: TxResult;
   try {
     const { txResponse, swapType: resolvedSwapType } = await transactionQueue.enqueue(chainId, async () => {
       const signer = getSigner(chainId);
@@ -132,10 +143,13 @@ refundRoutes.post("/help-me-refund", async (c: Context) => {
     const receipt = await txResponse.wait(1, TX_WAIT_TIMEOUT_MS);
     if (!receipt) throw new Error("Transaction receipt is null");
 
+    guardResult = { success: true, txHash: receipt.hash as string, swapType: resolvedSwapType };
+    refundGuard.settle(normalizedHash, chainId, guardResult);
+
     return c.json({
       success: true,
-      txHash: receipt.hash as string,
-      swapType: resolvedSwapType,
+      txHash: guardResult.txHash,
+      swapType: guardResult.swapType,
       chainId,
     });
   } catch (error) {
@@ -146,14 +160,14 @@ refundRoutes.post("/help-me-refund", async (c: Context) => {
     if (errorMessage.includes("no tokens locked") || errorMessage.includes("no Ether locked")) {
       const refundedLockup = await waitForRefundedLockup(lockupId!);
       if (refundedLockup) {
-        return c.json({
-          success: true,
-          txHash: refundedLockup.txHash,
-          swapType: refundedLockup.swapType,
-          chainId,
-        });
+        guardResult = { success: true, txHash: refundedLockup.txHash, swapType: refundedLockup.swapType ?? undefined };
+        refundGuard.settle(normalizedHash, chainId, guardResult);
+        return c.json({ success: true, txHash: refundedLockup.txHash, swapType: refundedLockup.swapType, chainId });
       }
     }
+
+    guardResult = { success: false, error: errorMessage };
+    refundGuard.settle(normalizedHash, chainId, guardResult);
 
     console.error("Refund failed:", error);
     return c.json({
