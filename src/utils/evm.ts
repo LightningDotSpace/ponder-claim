@@ -15,7 +15,8 @@ export function getProvider(chainId: number): ethers.JsonRpcProvider {
     const rpcUrl = CHAIN_RPC_URLS[chainId];
     if (!rpcUrl) throw new Error(`Missing RPC URL for chainId: ${chainId}`);
 
-    providers.set(chainId, new ethers.JsonRpcProvider(rpcUrl));
+    const staticNetwork = ethers.Network.from(chainId);
+    providers.set(chainId, new ethers.JsonRpcProvider(rpcUrl, staticNetwork, { staticNetwork }));
   }
   return providers.get(chainId)!;
 }
