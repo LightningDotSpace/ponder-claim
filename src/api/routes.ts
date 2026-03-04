@@ -23,32 +23,6 @@ const TX_WAIT_TIMEOUT_MS = 40_000;
 
 const routes = new Hono();
 
-/**
- * Wait for a lockup to be marked as claimed in the database.
- * Used to handle race conditions where Auto-Claim finished but Claim Event not yet indexed.
- * Default is: 5x2 seconds
- */
-async function waitForClaimedLockup(
-  lockupId: string,
-  maxAttempts = 5,
-  delayMs = 2000
-): Promise<{ txHash: string; swapType: string | null } | null> {
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    await new Promise(resolve => setTimeout(resolve, delayMs));
-
-    const lockup = await db.select().from(lockups)
-      .where(eq(lockups.id, lockupId))
-      .limit(1);
-
-    if (lockup[0]?.claimed && lockup[0]?.claimTxHash) {
-      return {
-        txHash: lockup[0].claimTxHash,
-        swapType: lockup[0].swapType,
-      };
-    }
-  }
-  return null;
-}
 
 routes.get("/check-preimagehash", async (c: Context) => {
   const preimageHash = c.req.query("preimageHash");
@@ -157,18 +131,16 @@ routes.post("/register-preimage", async (c: Context) => {
 });
 
 routes.post("/help-me-claim", async (c: Context) => {
-  const { preimageHash, preimage, chainId: requestedChainId } = await c.req.json();
+  const { preimageHash, preimage, chainId } = await c.req.json();
 
   if (!preimageHash) {
     return c.json({ error: "preimageHash is required" }, 400);
   }
 
-  // Validate preimageHash format
   if (!isValidPreimageHash(preimageHash)) {
     return c.json({ error: "Invalid preimageHash format. Must be 32 bytes (64 hex characters), optionally with 0x prefix" }, 400);
   }
 
-  // Validate preimage is provided and has correct format
   if (!preimage) {
     return c.json({ error: "preimage is required" }, 400);
   }
@@ -177,68 +149,33 @@ routes.post("/help-me-claim", async (c: Context) => {
     return c.json({ error: "Invalid preimage format. Must be 32 bytes (64 hex characters), optionally with 0x prefix" }, 400);
   }
 
-  const normalizedHash = prefix0x(preimageHash);
-
-  // Find the lockup - either by specific chainId or search all
-  let lockupData;
-  let lockupId: string;
-
-  if (requestedChainId) {
-    lockupId = createLockupId(requestedChainId, normalizedHash);
-    const lockup = await db.select().from(lockups).where(eq(lockups.id, lockupId)).limit(1);
-    lockupData = lockup[0];
-
-    // No lockup found for this specific chain - return 404 immediately
-    if (!lockupData) {
-      return c.json({ error: "Lockup not found" }, 404);
-    }
-
-    // When chainId is explicit: return existing txHash if already claimed (idempotent)
-    if (lockupData.claimed && lockupData.claimTxHash) {
-      return c.json({
-        success: true,
-        txHash: lockupData.claimTxHash,
-        swapType: lockupData.swapType,
-        chainId: lockupData.chainId,
-      });
-    }
-  } else {
-    // Search by preimageHash across all chains
-    const allLockups = await db.select().from(lockups).where(eq(lockups.preimageHash, normalizedHash));
-
-    if (!allLockups.length) {
-      return c.json({ error: "Lockup not found" }, 404);
-    }
-
-    // Find an unclaimed, unrefunded lockup - NO FALLBACK to avoid returning wrong chain's data
-    lockupData = allLockups.find(l => !l.claimed && !l.refunded);
-
-    if (!lockupData) {
-      // All lockups are either claimed or refunded - provide specific error
-      const refundedLockup = allLockups.find(l => l.refunded);
-      if (refundedLockup) {
-        return c.json({ error: "Swap was refunded", chainId: refundedLockup.chainId }, 409);
-      }
-      // Must be claimed (no other state possible since we filtered !claimed && !refunded)
-      return c.json({
-        error: "All lockups already claimed. Please provide chainId to get specific claim details.",
-        claimedChainIds: allLockups.filter(l => l.claimed).map(l => l.chainId)
-      }, 409);
-    }
-
-    lockupId = lockupData.id;
+  if (!chainId) {
+    return c.json({ error: "chainId is required" }, 400);
   }
 
-  // Refunded - cannot claim
+  const normalizedHash = prefix0x(preimageHash);
+  const lockupId = createLockupId(chainId, normalizedHash);
+  const lockup = await db.select().from(lockups).where(eq(lockups.id, lockupId)).limit(1);
+  const lockupData = lockup[0];
+
+  if (!lockupData) {
+    return c.json({ error: "Lockup not found" }, 404);
+  }
+
+  if (lockupData.claimed && lockupData.claimTxHash) {
+    return c.json({
+      success: true,
+      txHash: lockupData.claimTxHash,
+      swapType: lockupData.swapType,
+      chainId,
+    });
+  }
+
   if (lockupData.refunded) {
     return c.json({ error: "Swap was refunded" }, 409);
   }
 
-  const { amount, claimAddress, refundAddress, timelock, swapType, tokenAddress, chainId } = lockupData;
-
-  if (!chainId) {
-    return c.json({ error: "Missing chainId in lockup data" }, 500);
-  }
+  const { amount, claimAddress, refundAddress, timelock, swapType, tokenAddress } = lockupData;
 
   const contracts = CONTRACT_ADDRESSES[chainId];
   if (!contracts) {
@@ -246,9 +183,8 @@ routes.post("/help-me-claim", async (c: Context) => {
   }
 
   const signer = getSigner(chainId);
-  const currentBlock = await signer.provider!.getBlockNumber();
 
-  const knownTxHash = getInFlightTxHash(normalizedHash, chainId, currentBlock);
+  const knownTxHash = getInFlightTxHash(normalizedHash, chainId);
   if (knownTxHash) {
     try {
       const receipt = await signer.provider!.waitForTransaction(knownTxHash, 1, TX_WAIT_TIMEOUT_MS);
@@ -284,8 +220,7 @@ routes.post("/help-me-claim", async (c: Context) => {
       }
     });
 
-    const broadcastBlock = await signer.provider!.getBlockNumber();
-    setInFlightTxHash(normalizedHash, chainId, txResponse.hash, broadcastBlock);
+    setInFlightTxHash(normalizedHash, chainId, txResponse.hash);
 
     const receipt = await txResponse.wait(1, TX_WAIT_TIMEOUT_MS);
     if (!receipt) throw new Error("Transaction receipt is null");
@@ -306,16 +241,8 @@ routes.post("/help-me-claim", async (c: Context) => {
     console.error("Claim failed with diagnostics:", { chainId, lockupId, diagnostics });
 
     if (errorMessage.includes("no tokens locked") || errorMessage.includes("no Ether locked")) {
-      const claimedLockup = await waitForClaimedLockup(lockupId!);
-      if (claimedLockup) {
-        clearInFlight(normalizedHash, chainId);
-        return c.json({
-          success: true,
-          txHash: claimedLockup.txHash,
-          swapType: claimedLockup.swapType,
-          chainId,
-        });
-      }
+      clearInFlight(normalizedHash, chainId);
+      return c.json({ success: true, alreadyClaimed: true, chainId });
     }
 
     console.error("Claim failed:", error);
