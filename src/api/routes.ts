@@ -252,11 +252,20 @@ routes.post("/help-me-claim", async (c: Context) => {
   } catch (error) {
     const diagnostics = getTxDiagnostics(error);
     const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorCode = (error as any)?.code;
     console.error("Claim failed with diagnostics:", { chainId, lockupId, diagnostics });
 
     if (errorMessage.includes("no tokens locked") || errorMessage.includes("no Ether locked")) {
       clearInFlight(normalizedHash, chainId);
       return c.json({ success: true, alreadyClaimed: true, chainId });
+    }
+
+    if (errorCode === "TIMEOUT" || errorMessage.toLowerCase().includes("timeout") || errorMessage.toLowerCase().includes("timed out")) {
+      const inFlightHash = getInFlightTxHash(normalizedHash, chainId);
+      if (inFlightHash) {
+        console.warn("Claim tx pending (timeout in outer catch):", { chainId, txHash: inFlightHash });
+        return c.json({ pending: true, txHash: inFlightHash, chainId });
+      }
     }
 
     console.error("Claim failed:", error);
