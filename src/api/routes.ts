@@ -193,6 +193,11 @@ routes.post("/help-me-claim", async (c: Context) => {
         return c.json({ success: true, txHash: knownTxHash, swapType: swapType, chainId });
       }
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (errMsg.toLowerCase().includes("timeout") || errMsg.toLowerCase().includes("timed out")) {
+        console.warn("In-flight claim tx pending (timeout):", { chainId, txHash: knownTxHash });
+        return c.json({ pending: true, txHash: knownTxHash, swapType: swapType, chainId });
+      }
       console.error("Wait on in-flight claim tx failed:", err);
     }
   }
@@ -222,17 +227,26 @@ routes.post("/help-me-claim", async (c: Context) => {
 
     setInFlightTxHash(normalizedHash, chainId, txResponse.hash);
 
-    const receipt = await txResponse.wait(1, TX_WAIT_TIMEOUT_MS);
+    let receipt;
+    try {
+      receipt = await txResponse.wait(1, TX_WAIT_TIMEOUT_MS);
+    } catch (waitError) {
+      const waitErrorMessage = waitError instanceof Error ? waitError.message : String(waitError);
+      if (waitErrorMessage.toLowerCase().includes("timeout") || waitErrorMessage.toLowerCase().includes("timed out")) {
+        console.warn("Claim tx pending (timeout waiting for confirmation):", { chainId, txHash: txResponse.hash });
+        return c.json({ pending: true, txHash: txResponse.hash, swapType: resolvedSwapType, chainId });
+      }
+      throw waitError;
+    }
+
     if (!receipt) throw new Error("Transaction receipt is null");
 
     clearInFlight(normalizedHash, chainId);
 
-    const result = { txHash: receipt.hash as string, swapType: resolvedSwapType };
-
     return c.json({
       success: true,
-      txHash: result.txHash,
-      swapType: result.swapType,
+      txHash: receipt.hash as string,
+      swapType: resolvedSwapType,
       chainId,
     });
   } catch (error) {
