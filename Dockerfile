@@ -17,5 +17,5 @@ COPY . .
 # Expose port
 EXPOSE 42069
 
-# Start ponder
-CMD ["sh", "-c", "npx ponder start --schema schema-${COMMIT_HASH}"]
+# Run offchain migrations, then start ponder
+CMD ["sh", "-c", "npm run offchain:migrate && npx ponder start --schema schema-${COMMIT_HASH}"]

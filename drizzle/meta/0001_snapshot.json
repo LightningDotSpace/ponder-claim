@@ -1,0 +1,108 @@
+{
+  "id": "9c6e0da5-1f59-47ea-820e-b5129f39b90a",
+  "prevId": "01fe7f9f-82a4-4433-a58f-a7b25800541c",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "offchain.scheduled_claims": {
+      "name": "scheduled_claims",
+      "schema": "offchain",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "chain_id": {
+          "name": "chain_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "claim_address": {
+          "name": "claim_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "preimage": {
+          "name": "preimage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "preimage_hash": {
+          "name": "preimage_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "offchain.test_notes": {
+      "name": "test_notes",
+      "schema": "offchain",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {
+    "offchain": "offchain"
+  },
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

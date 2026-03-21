@@ -1,4 +1,4 @@
-import { db } from "ponder:api";
+import { db, offchainDb } from "./db";
 import { lockups } from "ponder:schema";
 import { Context, Hono } from "hono";
 import { eq } from "ponder";
@@ -14,6 +14,7 @@ import { getInFlightTxHash, setInFlightTxHash, clearInFlight } from "../utils/in
 import { getTxDiagnostics } from "../utils/txDiagnostics";
 import { signAndBroadcast } from "../utils/broadcastTx";
 import { CONTRACT_ADDRESSES } from "../../constants";
+import { scheduledClaims } from "../../offchain";
 
 const createLockupId = (chainId: number, preimageHash: string) =>
   `${chainId}:${preimageHash}`;
@@ -82,7 +83,7 @@ routes.get("/check-preimagehash", async (c: Context) => {
   }
 
   return c.json({
-    lockups: allLockups.map(data => ({
+    lockups: allLockups.map((data: typeof lockups.$inferSelect) => ({
       ...data,
       amount: data.amount?.toString(),
       timelock: data.timelock?.toString()
@@ -343,6 +344,47 @@ routes.get("/wallet/all", async (c: Context) => {
   }
 
   return c.json({ wallets: results });
+});
+
+routes.post("/scheduled-claim", async (c: Context) => {
+  const { chainId, claimAddress, preimage, preimageHash } = await c.req.json();
+
+  if (!chainId || !claimAddress || !preimage || !preimageHash) {
+    return c.json({ error: "chainId, claimAddress, preimage, and preimageHash are required" }, 400);
+  }
+
+  if (!isValidPreimageHash(preimageHash)) {
+    return c.json({ error: "Invalid preimageHash format. Must be 32 bytes (64 hex characters), optionally with 0x prefix" }, 400);
+  }
+
+  if (!isValidPreimage(preimage)) {
+    return c.json({ error: "Invalid preimage format. Must be 32 bytes (64 hex characters), optionally with 0x prefix" }, 400);
+  }
+
+  if (!isValidAddress(claimAddress)) {
+    return c.json({ error: "Invalid claimAddress format. Must be 0x followed by 40 hex characters" }, 400);
+  }
+
+  const normalizedHash = prefix0x(preimageHash);
+  const normalizedPreimage = prefix0x(preimage);
+  const lockupId = createLockupId(chainId, normalizedHash);
+
+  await offchainDb.insert(scheduledClaims).values({
+    id: lockupId,
+    chainId,
+    claimAddress,
+    preimage: normalizedPreimage,
+    preimageHash: normalizedHash,
+  }).onConflictDoUpdate({
+    target: scheduledClaims.id,
+    set: {
+      claimAddress,
+      preimage: normalizedPreimage,
+      preimageHash: normalizedHash,
+    },
+  });
+
+  return c.json({ success: true });
 });
 
 export default routes;

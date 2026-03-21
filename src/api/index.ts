@@ -6,6 +6,7 @@ import { swaggerUI } from "@hono/swagger-ui";
 import { openApiSchema } from "./openapi";
 import routes from "./routes";
 import refundRoutes from "./refundRoutes";
+import { startClaimScheduler } from "./claimScheduler";
 
 const app = new Hono();
 
@@ -18,5 +19,6 @@ app.use("/graphql", graphql({ db, schema }));
 
 app.route("/", routes);
 app.route("/", refundRoutes);
+startClaimScheduler();
 
 export default app;
