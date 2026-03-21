@@ -8,6 +8,8 @@
     "start": "ponder start",
     "db": "ponder db",
     "codegen": "ponder codegen",
+    "offchain:generate": "drizzle-kit generate",
+    "offchain:migrate": "tsx scripts/migrate-offchain.ts",
     "lint": "eslint .",
     "typecheck": "tsc",
     "postinstall": "patch-package"
@@ -23,6 +25,9 @@
   },
   "devDependencies": {
     "@types/node": "^20.9.0",
+    "@types/pg": "^8.18.0",
+    "drizzle-kit": "^0.31.10",
+    "drizzle-orm": "^0.41.0",
     "eslint": "^8.53.0",
     "eslint-config-ponder": "^0.15.10",
     "patch-package": "^8.0.1",
