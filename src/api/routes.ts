@@ -19,18 +19,6 @@ import { scheduledClaims } from "../../offchain";
 const createLockupId = (chainId: number, preimageHash: string) =>
   `${chainId}:${preimageHash}`;
 
-async function waitForLockup(
-  lockupId: string,
-  { attempts = 3, delayMs = 2000 } = {}
-): Promise<(typeof lockups.$inferSelect) | undefined> {
-  for (let i = 0; i < attempts; i++) {
-    const result = await db.select().from(lockups).where(eq(lockups.id, lockupId)).limit(1);
-    if (result[0]) return result[0];
-    if (i < attempts - 1) await new Promise((resolve) => setTimeout(resolve, delayMs));
-  }
-  return undefined;
-}
-
 const TX_WAIT_TIMEOUT_MS = 40_000;
 
 const routes = new Hono();
@@ -167,7 +155,8 @@ routes.post("/help-me-claim", async (c: Context) => {
 
   const normalizedHash = prefix0x(preimageHash);
   const lockupId = createLockupId(chainId, normalizedHash);
-  const lockupData = await waitForLockup(lockupId);
+  const lockupResult = await db.select().from(lockups).where(eq(lockups.id, lockupId)).limit(1);
+  const lockupData = lockupResult[0];
 
   if (!lockupData) {
     return c.json({ error: "Lockup not found" }, 404);
