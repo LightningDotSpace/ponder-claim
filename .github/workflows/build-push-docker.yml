@@ -1,18 +1,23 @@
-name: Build and Push Docker Image
+name: Build and Push Docker Image (manual)
+
+# Manual ad-hoc build that pushes the current branch as
+# lightningdotspacecom/boltz-claim:beta. Useful for testing branches
+# without going through develop/main. The regular DEV/PRD pipelines
+# live in ci-dev.yml and ci-prd.yml.
 
 on:
   workflow_dispatch:
 
 env:
-  DOCKER_TAGS: dfxswiss/boltz-claim:beta
+  DOCKER_TAGS: lightningdotspacecom/boltz-claim:beta
+
+permissions:
+  contents: read
 
 jobs:
   build-and-push:
-    name: Build and Push Docker Image
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
+    name: Build and push (linux/arm64)
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,6 +41,7 @@ jobs:
           context: .
           push: true
           tags: ${{ env.DOCKER_TAGS }}
+          platforms: linux/arm64
           build-args: |
             COMMIT_HASH=${{ steps.sha.outputs.short }}
             NODE_ENV=production

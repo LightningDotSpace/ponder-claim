@@ -1,4 +1,4 @@
-name: Boltz Claim PRD CI/CD
+name: LDS Boltz Claim PRD CI/CD
 
 on:
   push:
@@ -6,17 +6,15 @@ on:
   workflow_dispatch:
 
 env:
-  DOCKER_TAGS: dfxswiss/boltz-claim:latest
-  AZURE_RESOURCE_GROUP: rg-lds-api-prd
-  AZURE_VM_NAME: vm-lds-btc-prd
+  DOCKER_TAGS: lightningdotspacecom/boltz-claim:latest
+
+permissions:
+  contents: read
 
 jobs:
-  build-and-push:
-    name: Build and Push Docker Image
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
+  build-and-deploy:
+    name: Build and deploy to PRD
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,28 +38,22 @@ jobs:
           context: .
           push: true
           tags: ${{ env.DOCKER_TAGS }}
+          platforms: linux/arm64
           build-args: |
             COMMIT_HASH=${{ steps.sha.outputs.short }}
-            NODE_ENV=production
 
-      - name: Log in to Azure
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.LDS_PRD_CREDENTIALS }}
-
-      - name: Update Azure VM docker container
-        uses: azure/CLI@v2
-        with:
-          inlineScript: |
-            echo "Update docker container..."
-
-            az vm run-command invoke \
-              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-              --name ${{ env.AZURE_VM_NAME }} \
-              --command-id RunShellScript \
-              --scripts "/home/lds/update-boltz.sh claim"
-
-      - name: Logout from Azure
-        if: always()
+      - name: Install cloudflared
         run: |
-          az logout
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/download/2025.4.0/cloudflared-linux-arm64 -o /usr/local/bin/cloudflared
+          chmod +x /usr/local/bin/cloudflared
+
+      - name: Deploy
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_PRD_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          echo "${{ secrets.DEPLOY_PRD_SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key \
+            -o ProxyCommand="cloudflared access ssh --hostname ${{ secrets.DEPLOY_PRD_HOST }}" \
+            ${{ secrets.DEPLOY_PRD_USER }}@${{ secrets.DEPLOY_PRD_HOST }} \
+            "lds-boltz-claim"
